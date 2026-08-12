@@ -1,24 +1,39 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:lightning_core_ui/lightning_core_ui.dart';
+
+/// The connectivity status communicated by [DeviceCard]'s built-in status tag.
+enum DeviceCardStatus {
+  /// The device is online. Rendered as a success-styled "Online" tag.
+  online,
+
+  /// The device is offline. Rendered as a neutral-styled "Offline" tag.
+  offline,
+}
 
 /// A selectable card summarizing a connected device: thumbnail, name,
-/// serial/status line, optional battery level, and an "Online" tag.
+/// serial/status line, optional battery level, and a connectivity status tag.
 ///
-/// Hover, pressed, and keyboard-focus visuals are derived from real user
-/// input (mouse/keyboard) rather than exposed as a `state` parameter, so the
-/// widget behaves correctly under actual interaction instead of a fixed
-/// enum a caller could set inconsistently with real input.
-class DeviceCard extends StatefulWidget {
+/// Built on top of [DSSpaciousCard], which already implements everything a
+/// card needs to behave like the rest of the DS: token-driven background/
+/// border/shadow per [DSClickableState], keyboard activation (Enter/Space),
+/// mouse hover/press/focus visuals, and disabled-image opacity. This widget
+/// only supplies the device-specific content that [DSSpaciousCard] has no
+/// opinion about — the name/subline/battery block and the status tag.
+class DeviceCard extends StatelessWidget {
   const DeviceCard({
     super.key,
     required this.name,
     this.subline,
     this.thumbnail,
     this.batteryPercent,
-    this.showOnlineTag = true,
+    this.status = DeviceCardStatus.online,
     this.selected = false,
     this.enabled = true,
     this.isLoading = false,
     this.onTap,
+    this.focusNode,
+    this.autofocus = false,
     this.width = 438,
   });
 
@@ -28,15 +43,16 @@ class DeviceCard extends StatefulWidget {
   /// Secondary line, e.g. a serial number ("SN:865562").
   final String? subline;
 
-  /// Widget rendered in the 120x120 thumbnail slot. Falls back to a plain
-  /// placeholder box when omitted.
+  /// Widget rendered in the thumbnail slot. Falls back to a plain placeholder
+  /// box when omitted.
   final Widget? thumbnail;
 
   /// Battery level 0-100. The battery icon/percentage is hidden when null.
   final int? batteryPercent;
 
-  /// Whether to show the built-in "Online" status tag.
-  final bool showOnlineTag;
+  /// The connectivity status shown as a tag below the subline/battery row.
+  /// `null` hides the tag entirely.
+  final DeviceCardStatus? status;
 
   final bool selected;
   final bool enabled;
@@ -45,468 +61,252 @@ class DeviceCard extends StatefulWidget {
   /// interaction while true.
   final bool isLoading;
 
-  /// Card is non-interactive (no hover/press/focus visuals) when null.
+  /// Card is non-interactive (no hover/press/focus visuals, not keyboard
+  /// activatable) when null.
   final VoidCallback? onTap;
+
+  /// {@macro flutter.widgets.Focus.focusNode}
+  final FocusNode? focusNode;
+
+  /// {@macro flutter.widgets.Focus.autofocus}
+  final bool autofocus;
 
   final double width;
 
-  @override
-  State<DeviceCard> createState() => _DeviceCardState();
-}
-
-enum _CardVisualState { standard, hovered, pressed, focused, disabled }
-
-class _DeviceCardState extends State<DeviceCard> with SingleTickerProviderStateMixin {
-  bool _hovered = false;
-  bool _pressed = false;
-  bool _focused = false;
-
-  late final AnimationController _skeletonController;
-  late final Animation<Color?> _skeletonColor;
-
-  @override
-  void initState() {
-    super.initState();
-    _skeletonController = AnimationController(vsync: this, duration: _skeletonPulseDuration);
-    _skeletonColor = ColorTween(begin: _surfaceSkeleton, end: _surfaceSkeletonPulse)
-        .animate(CurvedAnimation(parent: _skeletonController, curve: Curves.easeInOut));
-    if (widget.isLoading) _skeletonController.repeat(reverse: true);
-  }
-
-  @override
-  void didUpdateWidget(DeviceCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.isLoading == oldWidget.isLoading) return;
-    if (widget.isLoading) {
-      _skeletonController.repeat(reverse: true);
-    } else {
-      _skeletonController.stop();
-    }
-  }
-
-  @override
-  void dispose() {
-    _skeletonController.dispose();
-    super.dispose();
-  }
-
-  bool get _interactive =>
-      widget.enabled && !widget.isLoading && widget.onTap != null;
-
-  _CardVisualState get _visualState {
-    if (!widget.enabled) return _CardVisualState.disabled;
-    if (!_interactive) return _CardVisualState.standard;
-    if (_pressed) return _CardVisualState.pressed;
-    if (_hovered) return _CardVisualState.hovered;
-    if (_focused) return _CardVisualState.focused;
-    return _CardVisualState.standard;
-  }
+  bool get _interactive => enabled && !isLoading && onTap != null;
 
   @override
   Widget build(BuildContext context) {
-    final state = widget.isLoading ? _CardVisualState.standard : _visualState;
+    final tokens = DSTokens.of(context);
+    final theme = DeviceCardThemeData(tokens);
+    final textColor = enabled ? theme.textColorStandard : theme.textColorDisabled;
+    final status = this.status;
 
-    Widget card = Container(
-      width: widget.width,
-      padding: const EdgeInsets.all(_spacingM),
-      decoration: _decorationFor(state),
-      child: widget.isLoading ? _buildSkeleton() : _buildContent(state),
-    );
-
-    if (_interactive) {
-      card = Semantics(
-        button: true,
-        enabled: widget.enabled,
-        selected: widget.selected,
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          onEnter: (_) => setState(() => _hovered = true),
-          onExit: (_) => setState(() => _hovered = false),
-          child: Focus(
-            onFocusChange: (focused) => setState(() => _focused = focused),
-            child: GestureDetector(
-              onTap: widget.onTap,
-              onTapDown: (_) => setState(() => _pressed = true),
-              onTapCancel: () => setState(() => _pressed = false),
-              onTapUp: (_) => setState(() => _pressed = false),
-              child: card,
-            ),
-          ),
-        ),
-      );
-    }
-
-    return card;
-  }
-
-  BoxDecoration _decorationFor(_CardVisualState state) {
-    return BoxDecoration(
-      color: _backgroundColor(widget.selected, state),
-      borderRadius: BorderRadius.circular(_radiusStandard),
-      border: Border.fromBorderSide(_borderSideFor(state)),
-      boxShadow: _cardShadow,
-    );
-  }
-
-  Widget _buildContent(_CardVisualState state) {
-    final disabled = state == _CardVisualState.disabled;
-    final textColor = disabled ? _textDisabled : _textStandard;
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Opacity(
-          opacity: disabled ? _disabledOpacity : 1,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(_radiusSmall),
-            child: SizedBox(
-              width: 120,
-              height: 120,
-              child: widget.thumbnail ?? const ColoredBox(color: _surfaceSubdued),
-            ),
-          ),
-        ),
-        const SizedBox(width: _spacingM),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                widget.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: _textBaseStrong.copyWith(color: textColor),
+    final card = DSSpaciousCard(
+      body: _DeviceCardBody(
+        name: name,
+        subline: subline,
+        batteryPercent: batteryPercent,
+        enabled: enabled,
+        textColor: textColor,
+        theme: theme,
+      ),
+      tags: status == null
+          ? null
+          : [
+              DSTag.status(
+                text: status == DeviceCardStatus.online ? 'Online' : 'Offline',
+                statusType: status == DeviceCardStatus.online
+                    ? DSStatusTagType.success
+                    : DSStatusTagType.neutral,
               ),
-              _SublineRow(
-                subline: widget.subline,
-                batteryPercent: widget.batteryPercent,
-                textColor: textColor,
-                disabled: disabled,
-              ),
-              if (widget.showOnlineTag)
-                const Padding(
-                  padding: EdgeInsets.only(top: _spacingXs),
-                  child: _StatusTag(label: 'Online'),
-                ),
             ],
-          ),
+      // Decorative: the thumbnail conveys no information beyond what [name]
+      // and [subline] already state, so it is excluded from the semantics
+      // tree rather than announced as an unlabeled image.
+      imageWidget: ExcludeSemantics(
+        child: thumbnail ?? ColoredBox(color: tokens.surface.subdued),
+      ),
+      selected: selected,
+      focusNode: focusNode,
+      autofocus: autofocus,
+      onPressed: _interactive ? onTap : null,
+    );
+
+    return Semantics(
+      // Exposed unconditionally so assistive tech reports the correct role,
+      // enabled and selected state even when the card is currently
+      // non-interactive (e.g. disabled or still loading).
+      button: true,
+      enabled: enabled,
+      selected: selected,
+      child: SizedBox(
+        width: width,
+        child: DSSkeletonizer(enabled: isLoading, child: card),
+      ),
+    );
+  }
+}
+
+/// Content-level design tokens for [DeviceCard].
+///
+/// The outer card chrome (background, border, shadow, hover/press/focus
+/// visuals, keyboard activation) is entirely supplied by [DSSpaciousCard];
+/// this theme only covers the content DSSpaciousCard has no opinion about —
+/// the name/subline/battery text styles and colors. It follows the same
+/// token-derivation convention used by the DS package's internal
+/// `*ThemeData` classes (e.g. `DSCheckboxThemeData`): a plain class whose
+/// fields are computed once from [DSTokensData] in the constructor.
+class DeviceCardThemeData {
+  DeviceCardThemeData(DSTokensData d)
+      : nameTextStyle = d.text.textBaseStrong,
+        sublineTextStyle = d.text.textBase,
+        batteryTextStyle = d.text.textSmStrong,
+        textColorStandard = d.text.standard,
+        textColorDisabled = d.text.disabled,
+        iconColorStandard = d.icon.standard,
+        iconColorDisabled = d.icon.disabled,
+        disabledOpacity = d.opacities.disabled,
+        dividerSpacing = d.spacing.component.xxs,
+        batteryIconSpacing = d.spacing.component.xxs;
+
+  /// Text style for the device name.
+  final TextStyle nameTextStyle;
+
+  /// Text style for the subline (e.g. serial number).
+  final TextStyle sublineTextStyle;
+
+  /// Text style for the battery percentage.
+  final TextStyle batteryTextStyle;
+
+  /// Text color used when the card is enabled.
+  final Color textColorStandard;
+
+  /// Text color used when the card is disabled.
+  final Color textColorDisabled;
+
+  /// Battery icon color used when the card is enabled.
+  final Color iconColorStandard;
+
+  /// Battery icon color used when the card is disabled.
+  final Color iconColorDisabled;
+
+  /// Opacity applied to the battery indicator when the card is disabled.
+  final double disabledOpacity;
+
+  /// Horizontal padding around the "·" divider between the subline and the
+  /// battery indicator.
+  final double dividerSpacing;
+
+  /// Spacing between the battery icon and its percentage text.
+  final double batteryIconSpacing;
+}
+
+class _DeviceCardBody extends StatelessWidget {
+  const _DeviceCardBody({
+    required this.name,
+    required this.subline,
+    required this.batteryPercent,
+    required this.enabled,
+    required this.textColor,
+    required this.theme,
+  });
+
+  final String name;
+  final String? subline;
+  final int? batteryPercent;
+  final bool enabled;
+  final Color textColor;
+  final DeviceCardThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        DSText(
+          name,
+          style: theme.nameTextStyle.copyWith(color: textColor),
+        ),
+        _SublineRow(
+          subline: subline,
+          batteryPercent: batteryPercent,
+          textColor: textColor,
+          enabled: enabled,
+          theme: theme,
         ),
       ],
     );
   }
-
-  Widget _buildSkeleton() {
-    return AnimatedBuilder(
-      animation: _skeletonColor,
-      builder: (context, child) {
-        final color = _skeletonColor.value ?? _surfaceSkeleton;
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            _SkeletonBox(width: 120, height: 120, color: color),
-            const SizedBox(width: _spacingM),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(
-                    height: 24,
-                    child: Align(alignment: Alignment.centerLeft, child: _SkeletonPill(width: 96, color: color)),
-                  ),
-                  SizedBox(
-                    height: 24,
-                    child: Align(alignment: Alignment.centerLeft, child: _SkeletonPill(width: 144, color: color)),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
 }
 
-Color _backgroundColor(bool selected, _CardVisualState state) {
-  switch (state) {
-    case _CardVisualState.hovered:
-      return selected ? _surfaceSelectedHovered : _surfaceHovered;
-    case _CardVisualState.pressed:
-      return selected ? _surfaceSelectedPressed : _surfacePressed;
-    case _CardVisualState.focused:
-    case _CardVisualState.disabled:
-    case _CardVisualState.standard:
-      return selected ? _surfaceSelectedStandard : _surfaceStandard;
-  }
-}
-
-BorderSide _borderSideFor(_CardVisualState state) {
-  if (state == _CardVisualState.focused) {
-    return const BorderSide(color: _borderFocused, width: _borderWidthFocus);
-  }
-  return const BorderSide(color: _borderSubdued, width: _borderWidthStandard);
-}
-
-/// Renders the subline and battery indicator on one line when they fit.
-///
-/// When the subline is too long to share a line with the battery indicator,
-/// the subline truncates to its own full-width line and the battery
-/// indicator drops to a second line without the "·" divider, matching the
-/// Figma overflow variant (node 5104:20550).
+/// Renders the subline and battery indicator on one line, letting the
+/// subline ellipsize first if space is tight. Using [Flexible] inside a
+/// [Row] (rather than measuring text widths by hand) keeps this correct
+/// under RTL layouts and text-scale changes for free.
 class _SublineRow extends StatelessWidget {
   const _SublineRow({
     required this.subline,
     required this.batteryPercent,
     required this.textColor,
-    required this.disabled,
+    required this.enabled,
+    required this.theme,
   });
 
   final String? subline;
   final int? batteryPercent;
   final Color textColor;
-  final bool disabled;
+  final bool enabled;
+  final DeviceCardThemeData theme;
 
   @override
   Widget build(BuildContext context) {
+    final subline = this.subline;
+    final batteryPercent = this.batteryPercent;
     if (subline == null && batteryPercent == null) return const SizedBox.shrink();
 
-    final sublineStyle = _textBase.copyWith(color: textColor);
-    final batteryTextStyle = _textSmStrong.copyWith(color: _textStandard);
+    final sublineStyle = theme.sublineTextStyle.copyWith(color: textColor);
 
-    if (subline == null) {
-      return _BatteryGroup(percent: batteryPercent!, textStyle: batteryTextStyle, disabled: disabled);
-    }
-
-    if (batteryPercent == null) {
-      return Text(subline!, maxLines: 1, overflow: TextOverflow.ellipsis, style: sublineStyle);
-    }
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        const dotWidth = 16.0;
-        final batteryWidth = _textWidth('$batteryPercent%', batteryTextStyle) + 24 + 4;
-        final sublineWidth = _textWidth(subline!, sublineStyle);
-        final fitsOnOneLine = sublineWidth + dotWidth + batteryWidth <= constraints.maxWidth;
-
-        if (fitsOnOneLine) {
-          return Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Flexible(child: Text(subline!, maxLines: 1, overflow: TextOverflow.ellipsis, style: sublineStyle)),
-              SizedBox(
-                width: dotWidth,
-                child: Text('·', textAlign: TextAlign.center, style: sublineStyle),
-              ),
-              _BatteryGroup(percent: batteryPercent!, textStyle: batteryTextStyle, disabled: disabled),
-            ],
-          );
-        }
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(subline!, maxLines: 1, overflow: TextOverflow.ellipsis, style: sublineStyle),
-            _BatteryGroup(percent: batteryPercent!, textStyle: batteryTextStyle, disabled: disabled),
-          ],
-        );
-      },
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        if (subline != null) Flexible(child: DSText(subline, style: sublineStyle)),
+        if (subline != null && batteryPercent != null)
+          // Purely decorative separator between the subline and the battery
+          // indicator; assistive tech should not announce it.
+          ExcludeSemantics(
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: theme.dividerSpacing),
+              child: Text('·', style: sublineStyle),
+            ),
+          ),
+        if (batteryPercent != null)
+          _BatteryGroup(percent: batteryPercent, enabled: enabled, theme: theme),
+      ],
     );
   }
 }
 
-double _textWidth(String text, TextStyle style) {
-  final painter = TextPainter(
-    text: TextSpan(text: text, style: style),
-    maxLines: 1,
-    textDirection: TextDirection.ltr,
-  )..layout();
-  return painter.width;
-}
-
 class _BatteryGroup extends StatelessWidget {
-  const _BatteryGroup({required this.percent, required this.textStyle, required this.disabled});
+  const _BatteryGroup({required this.percent, required this.enabled, required this.theme});
 
   final int percent;
-  final TextStyle textStyle;
-  final bool disabled;
+  final bool enabled;
+  final DeviceCardThemeData theme;
 
   @override
   Widget build(BuildContext context) {
+    final clamped = percent.clamp(0, 100);
+    final region = DSRegion.of(context);
+    final formatted =
+        NumberFormat.percentPattern(region.localizations.localeName).format(clamped / 100);
+
     return Opacity(
-      opacity: disabled ? _disabledOpacity : 1,
+      opacity: enabled ? 1 : theme.disabledOpacity,
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _BatteryIcon(percent: percent),
-          const SizedBox(width: 4),
-          Text('$percent%', style: textStyle),
+          DSIcon.small(iconRef: _batteryIconFor(clamped), color: theme.iconColorStandard),
+          SizedBox(width: theme.batteryIconSpacing),
+          DSText(
+            formatted,
+            style: theme.batteryTextStyle.copyWith(color: theme.textColorStandard),
+          ),
         ],
       ),
     );
   }
 }
 
-class _StatusTag extends StatelessWidget {
-  const _StatusTag({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: _spacingXs, vertical: _spacingXxs),
-      decoration: BoxDecoration(color: _surfaceSuccess, borderRadius: BorderRadius.circular(_radiusPill)),
-      child: Text(label, style: _textXs.copyWith(color: _textStandard)),
-    );
-  }
+/// Maps a battery percentage onto the closest DS battery glyph. The DS icon
+/// set only exports discrete levels (no continuous fill), so the mapping
+/// below buckets the range into five bands.
+DSIconRef _batteryIconFor(int percent) {
+  if (percent <= 10) return DSIcons.batteryEmpty;
+  if (percent <= 35) return DSIcons.batteryLow;
+  if (percent <= 65) return DSIcons.batteryMid;
+  if (percent <= 90) return DSIcons.batteryHigh;
+  return DSIcons.batteryFull;
 }
-
-class _SkeletonBox extends StatelessWidget {
-  const _SkeletonBox({required this.width, required this.height, required this.color});
-
-  final double width;
-  final double height;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: width,
-      height: height,
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(_radiusStandard)),
-    );
-  }
-}
-
-class _SkeletonPill extends StatelessWidget {
-  const _SkeletonPill({required this.width, required this.color});
-
-  final double width;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: width,
-      height: 16,
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(_radiusPill)),
-    );
-  }
-}
-
-/// Simple drawn battery glyph filled proportionally to [percent].
-///
-/// The Figma design only exports a "Battery-High" icon asset (no
-/// low/medium variants), so the level is redrawn programmatically here
-/// rather than swapping between exported assets.
-class _BatteryIcon extends StatelessWidget {
-  const _BatteryIcon({required this.percent});
-
-  final int percent;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 24,
-      height: 24,
-      child: CustomPaint(painter: _BatteryPainter(percent: percent.clamp(0, 100))),
-    );
-  }
-}
-
-class _BatteryPainter extends CustomPainter {
-  _BatteryPainter({required this.percent});
-
-  final int percent;
-
-  static const _bodyWidth = 18.0;
-  static const _bodyHeight = 10.0;
-  static const _capWidth = 2.0;
-  static const _capHeight = 4.0;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final left = (size.width - _bodyWidth - _capWidth) / 2;
-    final top = (size.height - _bodyHeight) / 2;
-
-    final outline = Paint()
-      ..color = _textStandard
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-    final fill = Paint()
-      ..color = _textStandard
-      ..style = PaintingStyle.fill;
-
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(Rect.fromLTWH(left, top, _bodyWidth, _bodyHeight), const Radius.circular(2)),
-      outline,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(
-        Rect.fromLTWH(left + _bodyWidth, top + (_bodyHeight - _capHeight) / 2, _capWidth, _capHeight),
-        const Radius.circular(1),
-      ),
-      fill,
-    );
-
-    final fillWidth = (_bodyWidth - 4) * (percent / 100);
-    if (fillWidth > 0) {
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(
-          Rect.fromLTWH(left + 2, top + 2, fillWidth, _bodyHeight - 4),
-          const Radius.circular(1),
-        ),
-        fill,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _BatteryPainter oldDelegate) => oldDelegate.percent != percent;
-}
-
-// Design tokens (from Figma "Equipment-Components" file, node 4837:19131).
-const double _radiusStandard = 12;
-const double _radiusSmall = 4;
-const double _radiusPill = 999;
-const double _spacingM = 16;
-const double _spacingXs = 8;
-const double _spacingXxs = 4;
-const double _borderWidthStandard = 1;
-const double _borderWidthFocus = 2;
-const double _disabledOpacity = 0.4;
-const Duration _skeletonPulseDuration = Duration(milliseconds: 1000);
-
-const Color _surfaceStandard = Color(0xFFFFFFFF);
-const Color _surfaceHovered = Color(0xFFEBEBEB);
-const Color _surfacePressed = Color(0xFFD7D7D7);
-const Color _surfaceSubdued = Color(0xFFF5F5F5);
-const Color _surfaceSkeleton = Color(0xFFD7D7D7);
-const Color _surfaceSkeletonPulse = Color(0xFFBDBDBD);
-const Color _surfaceSelectedStandard = Color(0xFFEAF5FA);
-const Color _surfaceSelectedHovered = Color(0xFFD5EBF6);
-const Color _surfaceSelectedPressed = Color(0xFFA8D5EB);
-const Color _surfaceSuccess = Color(0xFFAFE4C8);
-const Color _borderSubdued = Color(0xFFEBEBEB);
-const Color _borderFocused = Color(0xFF71A2FE);
-const Color _textStandard = Color(0xFF242424);
-const Color _textDisabled = Color(0xFF8A8A8A);
-
-// Figma uses "Be Vietnam Pro"; not bundled here, so text falls back to the
-// surrounding Theme's font family.
-const TextStyle _textBaseStrong =
-    TextStyle(fontSize: 16, height: 24 / 16, fontWeight: FontWeight.w600, letterSpacing: -0.4);
-const TextStyle _textBase =
-    TextStyle(fontSize: 16, height: 24 / 16, fontWeight: FontWeight.w400, letterSpacing: -0.4);
-const TextStyle _textSmStrong =
-    TextStyle(fontSize: 14, height: 20 / 14, fontWeight: FontWeight.w600, letterSpacing: -0.35);
-const TextStyle _textXs =
-    TextStyle(fontSize: 12, height: 16 / 12, fontWeight: FontWeight.w400, letterSpacing: -0.3);
-
-const List<BoxShadow> _cardShadow = [
-  BoxShadow(color: Color(0x05000000), offset: Offset(0, 1), blurRadius: 0.5),
-  BoxShadow(color: Color(0x0A000000), offset: Offset(0, 2), blurRadius: 4),
-];

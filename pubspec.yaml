@@ -35,6 +35,19 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
 
+  # DS Core UI design system (DSTokens, DSButton, DSIcon, ...).
+  # Consumed from the internal Bitbucket repo and pinned to a release tag,
+  # as documented in the lightning_core_ui README.
+  lightning_core_ui:
+    git:
+      url: https://bitbucket.dentsplysirona.com/scm/lig/lightning_core_ui.git
+      ref: v50.0.0
+
+  # Used directly to region-format the battery percentage via DSRegion's
+  # locale (NumberFormat.percentPattern). Version left unconstrained to match
+  # whatever lightning_core_ui / flutter_localizations already resolve.
+  intl: any
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -56,6 +69,15 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  # Roboto is Flutter's default fallback font. DS apps do not use it, but
+  # CanvasKit still requests it as an ultimate fallback. Declaring it as a
+  # local asset (shipped by lightning_core_ui) avoids a failing network
+  # fetch of fonts.gstatic.com. See the lightning_core_ui README.
+  fonts:
+    - family: Roboto
+      fonts:
+        - asset: packages/lightning_core_ui/src/fonts/Roboto-Regular.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

@@ -76,11 +76,6 @@ h2. Acceptance Criteria
  -- Disabled ({{enabled = false}}): card chrome (background/border) is identical to the Default/Selected-Default pairing above — disabled has no distinct card-chrome color of its own; the thumbnail, name/subline text block, battery group, and tags row each drop to {{var(--opacities-disabled, 0.4)}} opacity; name/subline additionally swap text color to {{var(--text-disabled, #8a8a8a)}}
  -- Loading ({{isLoading = true}}): {{DSSkeletonizer}} renders the real name/subline content as bones at full opacity; the tags row and battery indicator are hidden outright rather than boned (see Content Logic & Edge Cases); the thumbnail renders as a bone via {{DSSpaciousCard}}'s own image-slot skeleton support, keeping its normal {{border/radius/small}} corner
 
- - *A11y:*
- -- The whole card exposes {{Semantics(button: true, enabled: enabled, selected: selected)}} unconditionally — role/enabled/selected state is announced even while non-interactive (disabled or loading)
- -- Keyboard activation (Enter/Space) and mouse hover/press/focus visuals are provided by the underlying {{DSSpaciousCard}}
- -- The thumbnail is wrapped in {{ExcludeSemantics}} — decorative, conveys no information beyond {{name}}/{{subline}}, so it is not announced as an unlabeled image
- -- The "·" divider glyph is painted directly (not a child widget) and never enters the semantics tree
 
  - *Visual Fidelity:*
  -- *Card root:*

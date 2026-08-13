@@ -1,4 +1,7 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:lightning_core_ui/lightning_core_ui.dart';
 
 /// The connectivity status communicated by [DeviceCard]'s built-in status tag.
@@ -319,13 +322,73 @@ class _DeviceCardBody extends StatelessWidget {
   }
 }
 
-/// The subline and the battery indicator.
+/// The number of lines the subline text itself may occupy before it is
+/// truncated with an ellipsis.
 ///
-/// Figma models this as a wrapping flex row in which the "·" divider plus the
-/// battery indicator form a single non-shrinking unit. When that unit does not
-/// fit beside the subline it moves to a line of its own instead of squeezing
-/// the subline — so a [Wrap] with the divider and indicator grouped into one
-/// child is the direct Flutter equivalent.
+/// The battery indicator may add one more line on top of this budget; see
+/// [_SublineRow].
+const int _sublineMaxLines = 2;
+
+/// The glyph separating the subline from an inline battery indicator.
+const String _dividerGlyph = '·';
+
+/// The ellipsis [DSText] renders for a truncated subline, mirrored here so the
+/// measured last line matches the painted one.
+///
+/// This is the same character [RenderParagraph] uses for
+/// [TextOverflow.ellipsis].
+const String _ellipsis = '…';
+
+/// Slack, in logical pixels, allowed when deciding whether the divider plus
+/// the battery indicator still fit on the subline's last line.
+///
+/// Absorbs floating point noise from text measurement only; it is far below
+/// one device pixel.
+const double _inlineFitTolerance = 0.01;
+
+/// The subline and the battery indicator, laid out as a single text flow.
+///
+/// The rules, in the order they apply:
+///
+/// - The subline wraps onto at most [_sublineMaxLines] lines. A subline that
+///   would need a third line is truncated with a trailing ellipsis at the end
+///   of line 2 — standard [DSText] `maxLines`/[TextOverflow.ellipsis]
+///   semantics, which also gives the full string a hover tooltip.
+/// - The "· + battery indicator" unit is an *inline trailing element*, but
+///   only next to the subline's **first** line: if the subline is short
+///   enough to fit on one line, the unit attaches to the end of it when there
+///   is room. A subline that has already wrapped onto a second line never
+///   gets an inline battery next to that second line, even if there would be
+///   room — the battery always moves below in that case.
+/// - Whenever the unit does not attach inline (no room on a single-line
+///   subline, or the subline wrapped at all), the battery indicator alone
+///   moves to one additional line below (a third line when the subline used
+///   two), and the divider is not rendered at all — the divider only ever
+///   separates the battery from subline text *on the same line*.
+/// - The subline's two-line budget is independent of that decision: it is laid
+///   out at the full available width either way, so bumping the battery onto
+///   its own line never shortens the text. This is also why the whole thing is
+///   not one `Text.rich` flow with a single `maxLines` cap: text lines fill
+///   greedily, so no single cap can express "two lines for the subline, plus
+///   one more only for the battery".
+/// - With no subline the battery renders alone and, having nothing to be
+///   divided from, without the divider.
+///
+/// This is implemented as a small render object ([_SublineFlow]) because the
+/// inline-versus-own-line decision needs two measurements in the same layout
+/// pass, before anything is positioned:
+///
+/// - the subline's *last line* geometry, which comes from a [TextPainter]
+///   configured exactly like the [DSText] that paints the subline;
+/// - the battery indicator's *real* width, which comes from laying out the
+///   actual [DSBatteryIndicator] child. It cannot be derived from public DS
+///   API — `DSBatteryIndicatorThemeData` (icon box, icon/text gap, percentage
+///   text style) is `@internal` — and measuring the real widget keeps this
+///   card correct if those internals change.
+///
+/// A [Wrap] (what this row used before) can make the inline-versus-own-line
+/// decision on its own, but cannot drop the divider when the unit wraps, and
+/// treats the subline as one unbreakable block rather than letting it wrap.
 class _SublineRow extends StatelessWidget {
   const _SublineRow({
     required this.subline,
@@ -352,55 +415,418 @@ class _SublineRow extends StatelessWidget {
     }
 
     final sublineStyle = theme.sublineTextStyle.copyWith(color: textColor);
+    // What the `Text` inside `DSText` will actually resolve the style to: an
+    // inheriting style is merged onto the ambient DefaultTextStyle (which
+    // DSSpaciousCard installs around its body). Resolving it here keeps the
+    // measured text metrics identical to the painted ones, and gives the
+    // directly painted divider the same treatment the `Text` widget it
+    // replaced used to get.
+    final resolvedSublineStyle = sublineStyle.inherit
+        ? DefaultTextStyle.of(context).style.merge(sublineStyle)
+        : sublineStyle;
 
-    final batteryUnit = batteryPercent == null
-        ? null
-        : Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (subline != null)
-                // Purely decorative separator; assistive tech should not
-                // announce it. Figma gives the divider a fixed 16px box with
-                // the glyph centered inside, rather than padding around it.
-                ExcludeSemantics(
-                  child: SizedBox(
-                    width: theme.dividerWidth,
-                    child: Text(
-                      '·',
-                      textAlign: TextAlign.center,
-                      style: sublineStyle,
-                    ),
-                  ),
-                ),
-              // Figma applies `opacities/disabled` to this group as its own
-              // group opacity rather than swapping the icon/text colors, so
-              // the low-battery warning color stays recognizable while
-              // dimmed. DSBatteryIndicator exposes no disabled state, so the
-              // opacity is applied around it.
-              Opacity(
-                opacity: enabled ? 1 : theme.disabledOpacity,
-                child: DSBatteryIndicator(
-                  batteryLevel: batteryPercent,
-                  lowLevelThreshold: lowBatteryThreshold,
-                ),
-              ),
-            ],
-          );
-
-    return Wrap(
-      crossAxisAlignment: WrapCrossAlignment.center,
+    return _SublineFlow(
+      subline: subline,
+      sublineStyle: resolvedSublineStyle,
+      // Figma gives the divider a fixed 16px box with the glyph centered
+      // inside, rather than padding around the glyph.
+      dividerWidth: theme.dividerWidth,
       // Figma specifies a `4px 0px` gap: the horizontal separation is already
       // provided by the divider box, so only the run spacing is non-zero.
       runSpacing: theme.sublineRowRunSpacing,
-      children: [
-        // Once the battery unit wraps away, the subline gets the card's full
-        // content width, which is the behavior the Figma node describes. The
-        // DSText ellipsis only ever engages for a subline longer than the
-        // whole card — the reference node would silently clip there, which
-        // would drop the text with no tooltip and no way to read it.
-        if (subline != null) DSText(subline, style: sublineStyle),
-        ?batteryUnit,
-      ],
+      textScaler: MediaQuery.textScalerOf(context),
+      battery: batteryPercent == null
+          ? null
+          // Figma applies `opacities/disabled` to this group as its own group
+          // opacity rather than swapping the icon/text colors, so the
+          // low-battery warning color stays recognizable while dimmed.
+          // DSBatteryIndicator exposes no disabled state, so the opacity is
+          // applied around it.
+          : Opacity(
+              opacity: enabled ? 1 : theme.disabledOpacity,
+              child: DSBatteryIndicator(
+                batteryLevel: batteryPercent,
+                lowLevelThreshold: lowBatteryThreshold,
+              ),
+            ),
     );
+  }
+}
+
+/// The two children [_SublineFlow] positions.
+///
+/// The divider is deliberately not among them: it is painted directly by
+/// [_RenderSublineFlow], which is both how it can be omitted entirely (rather
+/// than merely hidden) when the battery is not inline, and how it stays out of
+/// the semantics tree — it is a decorative separator that assistive tech
+/// should not announce.
+enum _SublineSlot { subline, battery }
+
+/// Lays out the subline text and the battery indicator per the rules
+/// documented on [_SublineRow].
+class _SublineFlow
+    extends SlottedMultiChildRenderObjectWidget<_SublineSlot, RenderBox> {
+  const _SublineFlow({
+    required this.subline,
+    required this.sublineStyle,
+    required this.battery,
+    required this.dividerWidth,
+    required this.runSpacing,
+    required this.textScaler,
+  });
+
+  /// The subline text, or null when the battery renders on its own.
+  final String? subline;
+
+  /// The style [subline] is painted with, already resolved against the ambient
+  /// [DefaultTextStyle].
+  ///
+  /// Also used for the divider glyph, which Figma renders in the same style.
+  final TextStyle sublineStyle;
+
+  /// The battery indicator, or null when it is hidden (no battery level, or
+  /// the card is loading).
+  final Widget? battery;
+
+  /// Total width of the fixed box the divider glyph is centered in.
+  final double dividerWidth;
+
+  /// Vertical gap between the subline block and a battery indicator that did
+  /// not fit inline.
+  final double runSpacing;
+
+  /// The ambient text scaler, forwarded so measurement matches what [DSText]
+  /// renders.
+  final TextScaler textScaler;
+
+  /// The span used to measure [subline]; kept in sync with the [DSText] built
+  /// in [childForSlot] by deriving both from the same two fields.
+  TextSpan? get _sublineSpan {
+    final subline = this.subline;
+    return subline == null
+        ? null
+        : TextSpan(text: subline, style: sublineStyle);
+  }
+
+  TextSpan get _dividerSpan =>
+      TextSpan(text: _dividerGlyph, style: sublineStyle);
+
+  @override
+  Iterable<_SublineSlot> get slots => _SublineSlot.values;
+
+  @override
+  Widget? childForSlot(_SublineSlot slot) {
+    final subline = this.subline;
+    return switch (slot) {
+      _SublineSlot.subline => subline == null
+          ? null
+          : DSText(
+              subline,
+              style: sublineStyle,
+              maxLines: _sublineMaxLines,
+            ),
+      _SublineSlot.battery => battery,
+    };
+  }
+
+  @override
+  _RenderSublineFlow createRenderObject(BuildContext context) =>
+      _RenderSublineFlow(
+        sublineSpan: _sublineSpan,
+        dividerSpan: _dividerSpan,
+        dividerWidth: dividerWidth,
+        runSpacing: runSpacing,
+        textScaler: textScaler,
+      );
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderSublineFlow renderObject,
+  ) {
+    renderObject
+      ..sublineSpan = _sublineSpan
+      ..dividerSpan = _dividerSpan
+      ..dividerWidth = dividerWidth
+      ..runSpacing = runSpacing
+      ..textScaler = textScaler;
+  }
+}
+
+/// The result of one [_RenderSublineFlow] layout pass.
+///
+/// Offsets are relative to the render object's top left corner. A null
+/// [dividerOffset] means the divider is not painted at all for this layout.
+class _SublineGeometry {
+  const _SublineGeometry({
+    required this.size,
+    this.sublineOffset = Offset.zero,
+    this.batteryOffset = Offset.zero,
+    this.dividerOffset,
+  });
+
+  final Size size;
+  final Offset sublineOffset;
+  final Offset batteryOffset;
+  final Offset? dividerOffset;
+}
+
+/// Implements the layout described on [_SublineRow].
+class _RenderSublineFlow extends RenderBox
+    with SlottedContainerRenderObjectMixin<_SublineSlot, RenderBox> {
+  _RenderSublineFlow({
+    required this._sublineSpan,
+    required this._dividerSpan,
+    required this._dividerWidth,
+    required this._runSpacing,
+    required this._textScaler,
+  });
+
+  /// Measures — but never paints — the subline, to learn where its last line
+  /// ends and how tall that line is.
+  ///
+  /// Configured to match the `Text` that [DSText] paints: left-to-right,
+  /// start-aligned, capped at [_sublineMaxLines] with an ellipsis. The
+  /// left-to-right assumption mirrors [DSText]'s own internal measurement,
+  /// which is likewise hard-coded to it.
+  final TextPainter _sublinePainter = TextPainter(
+    textDirection: TextDirection.ltr,
+    maxLines: _sublineMaxLines,
+    ellipsis: _ellipsis,
+  );
+
+  /// Paints the divider glyph. See [_SublineSlot] for why it is not a child.
+  final TextPainter _dividerPainter =
+      TextPainter(textDirection: TextDirection.ltr);
+
+  Offset? _dividerOffset;
+
+  TextSpan? _sublineSpan;
+  set sublineSpan(TextSpan? value) {
+    if (_sublineSpan == value) return;
+    _sublineSpan = value;
+    markNeedsLayout();
+  }
+
+  TextSpan _dividerSpan;
+  set dividerSpan(TextSpan value) {
+    if (_dividerSpan == value) return;
+    _dividerSpan = value;
+    markNeedsLayout();
+  }
+
+  double _dividerWidth;
+  set dividerWidth(double value) {
+    if (_dividerWidth == value) return;
+    _dividerWidth = value;
+    markNeedsLayout();
+  }
+
+  double _runSpacing;
+  set runSpacing(double value) {
+    if (_runSpacing == value) return;
+    _runSpacing = value;
+    markNeedsLayout();
+  }
+
+  TextScaler _textScaler;
+  set textScaler(TextScaler value) {
+    if (_textScaler == value) return;
+    _textScaler = value;
+    markNeedsLayout();
+  }
+
+  RenderBox? get _sublineChild => childForSlot(_SublineSlot.subline);
+
+  RenderBox? get _batteryChild => childForSlot(_SublineSlot.battery);
+
+  /// Paint order, which is also the order the children are visited in for
+  /// semantics. Hit testing walks it in reverse.
+  @override
+  Iterable<RenderBox> get children => [
+        ?_sublineChild,
+        ?_batteryChild,
+      ];
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! BoxParentData) {
+      child.parentData = BoxParentData();
+    }
+  }
+
+  @override
+  void dispose() {
+    _sublinePainter.dispose();
+    _dividerPainter.dispose();
+    super.dispose();
+  }
+
+  @override
+  void performLayout() {
+    final geometry = _computeGeometry(constraints, dry: false);
+    size = geometry.size;
+    _offsetOf(_sublineChild)?.offset = geometry.sublineOffset;
+    _offsetOf(_batteryChild)?.offset = geometry.batteryOffset;
+    _dividerOffset = geometry.dividerOffset;
+  }
+
+  @override
+  Size computeDryLayout(BoxConstraints constraints) =>
+      _computeGeometry(constraints, dry: true).size;
+
+  @override
+  double computeMinIntrinsicWidth(double height) => math.max(
+        _sublineChild?.getMinIntrinsicWidth(height) ?? 0,
+        _batteryChild?.getMinIntrinsicWidth(height) ?? 0,
+      );
+
+  @override
+  double computeMaxIntrinsicWidth(double height) {
+    final subline = _sublineChild?.getMaxIntrinsicWidth(height);
+    final battery = _batteryChild?.getMaxIntrinsicWidth(height);
+    if (subline == null || battery == null) {
+      return subline ?? battery ?? 0;
+    }
+    // Widest sensible layout: the whole subline on one line, with the divider
+    // and the battery indicator inline behind it.
+    return subline + _dividerWidth + battery;
+  }
+
+  @override
+  double computeMinIntrinsicHeight(double width) =>
+      _computeGeometry(BoxConstraints(maxWidth: width), dry: true).size.height;
+
+  @override
+  double computeMaxIntrinsicHeight(double width) =>
+      computeMinIntrinsicHeight(width);
+
+  BoxParentData? _offsetOf(RenderBox? child) =>
+      child?.parentData as BoxParentData?;
+
+  _SublineGeometry _computeGeometry(
+    BoxConstraints constraints, {
+    required bool dry,
+  }) {
+    final maxWidth = constraints.maxWidth;
+    final childConstraints = BoxConstraints(maxWidth: maxWidth);
+    Size measure(RenderBox child) => dry
+        ? child.getDryLayout(childConstraints)
+        : (child..layout(childConstraints, parentUsesSize: true)).size;
+
+    final subline = _sublineChild;
+    final battery = _batteryChild;
+    final sublineSize = subline == null ? null : measure(subline);
+    final batterySize = battery == null ? null : measure(battery);
+
+    if (batterySize == null) {
+      return _SublineGeometry(
+        size: constraints.constrain(sublineSize ?? Size.zero),
+      );
+    }
+    if (sublineSize == null) {
+      // The battery renders alone: no subline means nothing to divide it from,
+      // so no divider either.
+      return _SublineGeometry(size: constraints.constrain(batterySize));
+    }
+
+    _sublinePainter
+      ..text = _sublineSpan ?? const TextSpan(text: '')
+      ..textScaler = _textScaler
+      ..layout(maxWidth: maxWidth);
+    // Guards against a painter/child disagreement (e.g. a skeleton bone
+    // standing in for the text) clipping the block.
+    final textHeight = math.max(sublineSize.height, _sublinePainter.height);
+
+    final lines = _sublinePainter.computeLineMetrics();
+    final lastLine = lines.isEmpty ? null : lines.last;
+    final lastLineEnd = lastLine == null ? 0.0 : lastLine.left + lastLine.width;
+    final lastLineBaseline = lastLine?.baseline ??
+        _sublinePainter.computeDistanceToActualBaseline(TextBaseline.alphabetic);
+
+    // Inline placement is only attempted next to the subline's first line.
+    // A subline that has already wrapped onto a second line always puts the
+    // battery on its own line below, even if that second line has room.
+    final fitsInline = lines.length <= 1 &&
+        lastLineEnd + _dividerWidth + batterySize.width <=
+            maxWidth + _inlineFitTolerance;
+
+    if (!fitsInline) {
+      // One extra line below everything the subline used, battery only.
+      return _SublineGeometry(
+        size: constraints.constrain(Size(
+          math.max(sublineSize.width, batterySize.width),
+          textHeight + _runSpacing + batterySize.height,
+        )),
+        batteryOffset: Offset(0, textHeight + _runSpacing),
+      );
+    }
+
+    // Centered on the last line rather than on the whole text block, so a
+    // wrapped subline keeps the indicator next to the line it belongs to.
+    final lastLineTop =
+        lastLine == null ? 0.0 : lastLine.baseline - lastLine.ascent;
+    final lastLineBottom = lastLine == null
+        ? textHeight
+        : lastLine.baseline + lastLine.descent;
+    final batteryLeft = lastLineEnd + _dividerWidth;
+    final batteryTop = (lastLineTop + lastLineBottom - batterySize.height) / 2;
+    // An indicator taller than the line it sits on pushes the whole block
+    // down instead of being clipped at the top. On a single-line subline this
+    // reproduces the vertical centering the previous [Wrap] produced.
+    final shift = math.max(0.0, -batteryTop);
+
+    _dividerPainter
+      ..text = _dividerSpan
+      ..textScaler = _textScaler
+      ..layout();
+    final dividerBaseline =
+        _dividerPainter.computeDistanceToActualBaseline(TextBaseline.alphabetic);
+
+    return _SublineGeometry(
+      size: constraints.constrain(Size(
+        math.max(sublineSize.width, batteryLeft + batterySize.width),
+        math.max(textHeight, batteryTop + batterySize.height) + shift,
+      )),
+      sublineOffset: Offset(0, shift),
+      batteryOffset: Offset(batteryLeft, batteryTop + shift),
+      dividerOffset: Offset(
+        // Centered in its fixed-width box, and sharing the last line's
+        // baseline since it is set in the subline's own style.
+        lastLineEnd + (_dividerWidth - _dividerPainter.width) / 2,
+        lastLineBaseline - dividerBaseline + shift,
+      ),
+    );
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final subline = _sublineChild;
+    if (subline != null) {
+      context.paintChild(subline, offset + _offsetOf(subline)!.offset);
+    }
+    final dividerOffset = _dividerOffset;
+    if (dividerOffset != null) {
+      _dividerPainter.paint(context.canvas, offset + dividerOffset);
+    }
+    final battery = _batteryChild;
+    if (battery != null) {
+      context.paintChild(battery, offset + _offsetOf(battery)!.offset);
+    }
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
+    for (final child in children.toList().reversed) {
+      final childOffset = _offsetOf(child)!.offset;
+      final hit = result.addWithPaintOffset(
+        offset: childOffset,
+        position: position,
+        hitTest: (result, transformed) =>
+            child.hitTest(result, position: transformed),
+      );
+      if (hit) return true;
+    }
+    return false;
   }
 }

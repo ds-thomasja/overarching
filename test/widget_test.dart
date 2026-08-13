@@ -38,12 +38,12 @@ void main() {
     expect(find.text('72%'), findsOneWidget);
 
     // The controls panel exposes the title/subline inputs, the state
-    // dropdown and the battery toggle.
+    // dropdown and the battery/selected toggles.
     final dropdownFinder =
         find.byWidgetPredicate((widget) => widget is DSDropdown);
     expect(find.byType(DSInput), findsNWidgets(2));
     expect(dropdownFinder, findsOneWidget);
-    expect(find.byType(DSSwitch), findsOneWidget);
+    expect(find.byType(DSSwitch), findsNWidgets(2));
 
     // Switching the state dropdown to "Loading" updates the live preview.
     await tester.tap(dropdownFinder);

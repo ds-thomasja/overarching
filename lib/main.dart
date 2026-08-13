@@ -326,6 +326,7 @@ class _DeviceCardPlaygroundState extends State<_DeviceCardPlayground> {
   late final _sublineController = TextEditingController(text: 'SN:865562');
   _DeviceCardDemoState _state = _DeviceCardDemoState.default_;
   bool _showBattery = true;
+  bool _selected = false;
 
   @override
   void dispose() {
@@ -343,6 +344,7 @@ class _DeviceCardPlaygroundState extends State<_DeviceCardPlayground> {
       subline:
           _sublineController.text.isEmpty ? null : _sublineController.text,
       batteryPercent: _showBattery ? 72 : null,
+      selected: _selected,
       enabled: _state != _DeviceCardDemoState.disabled,
       isLoading: _state == _DeviceCardDemoState.loading,
       onTap: () {},
@@ -395,6 +397,11 @@ class _DeviceCardPlaygroundState extends State<_DeviceCardPlayground> {
               label: 'Battery',
               value: _showBattery,
               onChanged: (value) => setState(() => _showBattery = value),
+            ),
+            DSSwitch(
+              label: 'Selected',
+              value: _selected,
+              onChanged: (value) => setState(() => _selected = value),
             ),
           ],
         ),

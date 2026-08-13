@@ -214,7 +214,7 @@ packages:
     source: hosted
     version: "4.1.2"
   intl:
-    dependency: "direct main"
+    dependency: transitive
     description:
       name: intl
       sha256: "3df61194eb431efc39c4ceba583b95633a403f46c9fd341e550ce0bfa50e9aa5"
@@ -249,8 +249,8 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: "v50.0.0"
-      resolved-ref: "3550900d8bd88523c620973e5b1ae44ff1d3ac4f"
+      ref: "v51.0.0"
+      resolved-ref: "910349f7ffa13e4263ef3ef272538f7136b1b9c0"
       url: "https://bitbucket.dentsplysirona.com/scm/lig/lightning_core_ui.git"
     source: git
     version: "0.0.0"

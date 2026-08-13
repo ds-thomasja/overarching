@@ -41,12 +41,7 @@ dependencies:
   lightning_core_ui:
     git:
       url: https://bitbucket.dentsplysirona.com/scm/lig/lightning_core_ui.git
-      ref: v50.0.0
-
-  # Used directly to region-format the battery percentage via DSRegion's
-  # locale (NumberFormat.percentPattern). Version left unconstrained to match
-  # whatever lightning_core_ui / flutter_localizations already resolve.
-  intl: any
+      ref: v51.0.0
 
 dev_dependencies:
   flutter_test:

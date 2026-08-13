@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:lightning_core_ui/lightning_core_ui.dart';
 
 /// The connectivity status communicated by [DeviceCard]'s built-in status tag.
@@ -20,6 +19,22 @@ enum DeviceCardStatus {
 /// mouse hover/press/focus visuals, and disabled-image opacity. This widget
 /// only supplies the device-specific content that [DSSpaciousCard] has no
 /// opinion about — the name/subline/battery block and the status tag.
+///
+/// ## Relationship to the Figma source of truth
+///
+/// The design lives in Figma "Equipment-Components", node `4837:19131`. Where
+/// that node and [DSSpaciousCard] disagree on card *chrome*, this widget
+/// follows [DSSpaciousCard] (and therefore the current DS tokens) rather than
+/// re-implementing the chrome by hand:
+///
+/// - Content padding: Figma shows `spacing/component/m` (16), DS uses
+///   `spacing.layout.m` (24 on non-small form factors).
+/// - Thumbnail size: Figma shows 120x120, DS uses `image.size.card`
+///   (128 on non-small, 64 on small).
+///
+/// Everything the card *content* controls does follow the Figma node exactly,
+/// including the thumbnail's `border/radius/small` corner (which deliberately
+/// differs from the card's own `border/radius/standard`).
 class DeviceCard extends StatelessWidget {
   const DeviceCard({
     super.key,
@@ -27,6 +42,7 @@ class DeviceCard extends StatelessWidget {
     this.subline,
     this.thumbnail,
     this.batteryPercent,
+    this.lowBatteryThreshold = 30,
     this.status = DeviceCardStatus.online,
     this.selected = false,
     this.enabled = true,
@@ -47,8 +63,18 @@ class DeviceCard extends StatelessWidget {
   /// box when omitted.
   final Widget? thumbnail;
 
-  /// Battery level 0-100. The battery icon/percentage is hidden when null.
+  /// Battery level 0-100. The battery indicator is hidden when null.
+  ///
+  /// Forwarded verbatim to [DSBatteryIndicator.batteryLevel], which asserts
+  /// the 0-100 range.
   final int? batteryPercent;
+
+  /// At or below this battery level the battery indicator switches to the
+  /// critical icon color.
+  ///
+  /// Forwarded to [DSBatteryIndicator.lowLevelThreshold]; the default of 30
+  /// mirrors that widget's own default.
+  final int lowBatteryThreshold;
 
   /// The connectivity status shown as a tag below the subline/battery row.
   /// `null` hides the tag entirely.
@@ -57,8 +83,32 @@ class DeviceCard extends StatelessWidget {
   final bool selected;
   final bool enabled;
 
-  /// Shows skeleton placeholders instead of content and disables
-  /// interaction while true.
+  /// Puts the card into its loading state and disables interaction.
+  ///
+  /// This does **not** swap in a separate placeholder layout. The real content
+  /// tree is built either way; [DSSkeletonizer] merely publishes the ambient
+  /// skeleton flag, and each skeleton-aware DS widget below renders itself as
+  /// a bone whose shape is derived from the content it was actually given.
+  ///
+  /// The practical consequence is that whatever [name] and [subline] the
+  /// caller passes while loading determines the bone widths, so callers should
+  /// pass representative placeholder (or last-known) strings rather than empty
+  /// ones.
+  ///
+  /// Two parts of the card are not covered by that mechanism:
+  ///
+  /// - The tags row is suppressed outright, matching the Figma
+  ///   "Disabled + loading" variant, which renders no tags row at all.
+  /// - [DSBatteryIndicator] is not skeleton-aware in `lightning_core_ui`
+  ///   v51.0.0 — it neither wraps itself in the DS skeleton wrapper nor is
+  ///   listed among `DSSkeletonizer`'s supported widgets — so the battery
+  ///   icon and percentage keep rendering as real content while loading.
+  ///   This is a gap in the DS package rather than something this card works
+  ///   around, so that it disappears on its own once the package closes it.
+  ///
+  /// The thumbnail *is* covered: `DSSpaciousCard` replaces its image slot
+  /// with a bone while skeleton mode is on, and this card always supplies an
+  /// [DSSpaciousCard.imageWidget], so the slot is always present to be boned.
   final bool isLoading;
 
   /// Card is non-interactive (no hover/press/focus visuals, not keyboard
@@ -71,6 +121,7 @@ class DeviceCard extends StatelessWidget {
   /// {@macro flutter.widgets.Focus.autofocus}
   final bool autofocus;
 
+  /// The fixed card width from the Figma node.
   final double width;
 
   bool get _interactive => enabled && !isLoading && onTap != null;
@@ -79,33 +130,56 @@ class DeviceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = DSTokens.of(context);
     final theme = DeviceCardThemeData(tokens);
-    final textColor = enabled ? theme.textColorStandard : theme.textColorDisabled;
     final status = this.status;
 
     final card = DSSpaciousCard(
+      // The body is built identically whether or not the card is loading.
+      // `DSText` opts into skeleton mode on its own, so while [isLoading] the
+      // name and subline render as bones whose width and height are derived
+      // from the text and text style actually passed in — which is how the DS
+      // skeleton mechanism is meant to be driven. See [isLoading].
       body: _DeviceCardBody(
         name: name,
         subline: subline,
         batteryPercent: batteryPercent,
+        lowBatteryThreshold: lowBatteryThreshold,
         enabled: enabled,
-        textColor: textColor,
         theme: theme,
       ),
-      tags: status == null
+      // The Figma node renders no tags row at all while loading.
+      tags: (isLoading || status == null)
           ? null
           : [
-              DSTag.status(
-                text: status == DeviceCardStatus.online ? 'Online' : 'Offline',
-                statusType: status == DeviceCardStatus.online
-                    ? DSStatusTagType.success
-                    : DSStatusTagType.neutral,
+              // Per Figma the whole tags row carries its own
+              // `opacities/disabled`, independently of the text-color swap
+              // applied to the name/subline. With a single tag, dimming the
+              // tag is equivalent to dimming the row.
+              Opacity(
+                opacity: enabled ? 1 : theme.disabledOpacity,
+                child: DSTag.status(
+                  text:
+                      status == DeviceCardStatus.online ? 'Online' : 'Offline',
+                  statusType: status == DeviceCardStatus.online
+                      ? DSStatusTagType.success
+                      : DSStatusTagType.neutral,
+                ),
               ),
             ],
       // Decorative: the thumbnail conveys no information beyond what [name]
       // and [subline] already state, so it is excluded from the semantics
       // tree rather than announced as an unlabeled image.
+      //
+      // Built identically whether or not the card is loading, so the slot
+      // keeps its real `border/radius/small` corner in both states.
       imageWidget: ExcludeSemantics(
-        child: thumbnail ?? ColoredBox(color: tokens.surface.subdued),
+        // DSSpaciousCard clips the image slot with the card's standard
+        // radius; the Figma node asks for the smaller `border/radius/small`
+        // on the thumbnail specifically. Clipping again with the smaller
+        // radius inside the DS clip yields the intended corner.
+        child: ClipRRect(
+          borderRadius: theme.thumbnailBorderRadius,
+          child: thumbnail ?? ColoredBox(color: tokens.surface.subdued),
+        ),
       ),
       selected: selected,
       focusNode: focusNode,
@@ -122,6 +196,10 @@ class DeviceCard extends StatelessWidget {
       selected: selected,
       child: SizedBox(
         width: width,
+        // The single mechanism that produces the loading state: it publishes
+        // the ambient skeleton flag that every skeleton-aware DS widget in
+        // the card below reads. There is deliberately no parallel, hand-built
+        // placeholder tree. See [isLoading].
         child: DSSkeletonizer(enabled: isLoading, child: card),
       ),
     );
@@ -130,25 +208,23 @@ class DeviceCard extends StatelessWidget {
 
 /// Content-level design tokens for [DeviceCard].
 ///
-/// The outer card chrome (background, border, shadow, hover/press/focus
-/// visuals, keyboard activation) is entirely supplied by [DSSpaciousCard];
-/// this theme only covers the content DSSpaciousCard has no opinion about —
-/// the name/subline/battery text styles and colors. It follows the same
-/// token-derivation convention used by the DS package's internal
-/// `*ThemeData` classes (e.g. `DSCheckboxThemeData`): a plain class whose
-/// fields are computed once from [DSTokensData] in the constructor.
+/// The outer card chrome (background, border, two-layer `shadows.elevation1`,
+/// hover/press/focus visuals, keyboard activation) is entirely supplied by
+/// [DSSpaciousCard]; this theme only covers the content DSSpaciousCard has no
+/// opinion about. It follows the same token-derivation convention used by the
+/// DS package's internal `*ThemeData` classes (e.g. `DSCheckboxThemeData`): a
+/// plain class whose fields are computed once from [DSTokensData] in the
+/// constructor.
 class DeviceCardThemeData {
   DeviceCardThemeData(DSTokensData d)
       : nameTextStyle = d.text.textBaseStrong,
         sublineTextStyle = d.text.textBase,
-        batteryTextStyle = d.text.textSmStrong,
         textColorStandard = d.text.standard,
         textColorDisabled = d.text.disabled,
-        iconColorStandard = d.icon.standard,
-        iconColorDisabled = d.icon.disabled,
         disabledOpacity = d.opacities.disabled,
-        dividerSpacing = d.spacing.component.xxs,
-        batteryIconSpacing = d.spacing.component.xxs;
+        dividerWidth = d.spacing.component.m,
+        sublineRowRunSpacing = d.spacing.component.xxs,
+        thumbnailBorderRadius = BorderRadius.circular(d.border.radius.small);
 
   /// Text style for the device name.
   final TextStyle nameTextStyle;
@@ -156,30 +232,38 @@ class DeviceCardThemeData {
   /// Text style for the subline (e.g. serial number).
   final TextStyle sublineTextStyle;
 
-  /// Text style for the battery percentage.
-  final TextStyle batteryTextStyle;
-
   /// Text color used when the card is enabled.
   final Color textColorStandard;
 
   /// Text color used when the card is disabled.
   final Color textColorDisabled;
 
-  /// Battery icon color used when the card is enabled.
-  final Color iconColorStandard;
-
-  /// Battery icon color used when the card is disabled.
-  final Color iconColorDisabled;
-
-  /// Opacity applied to the battery indicator when the card is disabled.
+  /// Opacity applied to the battery indicator group and the tags row when the
+  /// card is disabled.
+  ///
+  /// [DSBatteryIndicator] has no disabled state of its own, so this card
+  /// applies the token as a group opacity around it.
   final double disabledOpacity;
 
-  /// Horizontal padding around the "·" divider between the subline and the
-  /// battery indicator.
-  final double dividerSpacing;
+  /// Total width of the "·" divider between the subline and the battery
+  /// indicator. The glyph is centered inside it.
+  final double dividerWidth;
 
-  /// Spacing between the battery icon and its percentage text.
-  final double batteryIconSpacing;
+  /// Vertical gap between the two lines of the subline row when the battery
+  /// indicator wraps onto its own line.
+  final double sublineRowRunSpacing;
+
+  /// Corner radius of the thumbnail, in every state including loading.
+  ///
+  /// Deliberately `border/radius/small`, smaller than the card's own
+  /// `border/radius/standard`, per the Figma node.
+  ///
+  /// A static Figma "loading" frame shows the thumbnail placeholder at
+  /// `border/radius/standard` instead. That is not reproduced here: the DS
+  /// skeleton mechanism derives bones from the real content, so the real
+  /// component keeps its own radius while loading. Real component behavior
+  /// wins over the static mockup.
+  final BorderRadius thumbnailBorderRadius;
 }
 
 class _DeviceCardBody extends StatelessWidget {
@@ -187,31 +271,38 @@ class _DeviceCardBody extends StatelessWidget {
     required this.name,
     required this.subline,
     required this.batteryPercent,
+    required this.lowBatteryThreshold,
     required this.enabled,
-    required this.textColor,
     required this.theme,
   });
 
   final String name;
   final String? subline;
   final int? batteryPercent;
+  final int lowBatteryThreshold;
   final bool enabled;
-  final Color textColor;
   final DeviceCardThemeData theme;
 
   @override
   Widget build(BuildContext context) {
+    // Per Figma the name and subline swap to `text/disabled` when the card is
+    // disabled, whereas the battery group and the tags row instead keep their
+    // standard colors under a group opacity.
+    final textColor =
+        enabled ? theme.textColorStandard : theme.textColorDisabled;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        DSText(
-          name,
-          style: theme.nameTextStyle.copyWith(color: textColor),
-        ),
+        // The name is the one text in this card that Figma does mark as
+        // truncating (`overflow-hidden text-ellipsis whitespace-nowrap`),
+        // which is DSText's default behavior.
+        DSText(name, style: theme.nameTextStyle.copyWith(color: textColor)),
         _SublineRow(
           subline: subline,
           batteryPercent: batteryPercent,
+          lowBatteryThreshold: lowBatteryThreshold,
           textColor: textColor,
           enabled: enabled,
           theme: theme,
@@ -221,14 +312,18 @@ class _DeviceCardBody extends StatelessWidget {
   }
 }
 
-/// Renders the subline and battery indicator on one line, letting the
-/// subline ellipsize first if space is tight. Using [Flexible] inside a
-/// [Row] (rather than measuring text widths by hand) keeps this correct
-/// under RTL layouts and text-scale changes for free.
+/// The subline and the battery indicator.
+///
+/// Figma models this as a wrapping flex row in which the "·" divider plus the
+/// battery indicator form a single non-shrinking unit. When that unit does not
+/// fit beside the subline it moves to a line of its own instead of squeezing
+/// the subline — so a [Wrap] with the divider and indicator grouped into one
+/// child is the direct Flutter equivalent.
 class _SublineRow extends StatelessWidget {
   const _SublineRow({
     required this.subline,
     required this.batteryPercent,
+    required this.lowBatteryThreshold,
     required this.textColor,
     required this.enabled,
     required this.theme,
@@ -236,6 +331,7 @@ class _SublineRow extends StatelessWidget {
 
   final String? subline;
   final int? batteryPercent;
+  final int lowBatteryThreshold;
   final Color textColor;
   final bool enabled;
   final DeviceCardThemeData theme;
@@ -244,69 +340,60 @@ class _SublineRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final subline = this.subline;
     final batteryPercent = this.batteryPercent;
-    if (subline == null && batteryPercent == null) return const SizedBox.shrink();
+    if (subline == null && batteryPercent == null) {
+      return const SizedBox.shrink();
+    }
 
     final sublineStyle = theme.sublineTextStyle.copyWith(color: textColor);
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.center,
+    final batteryUnit = batteryPercent == null
+        ? null
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (subline != null)
+                // Purely decorative separator; assistive tech should not
+                // announce it. Figma gives the divider a fixed 16px box with
+                // the glyph centered inside, rather than padding around it.
+                ExcludeSemantics(
+                  child: SizedBox(
+                    width: theme.dividerWidth,
+                    child: Text(
+                      '·',
+                      textAlign: TextAlign.center,
+                      style: sublineStyle,
+                    ),
+                  ),
+                ),
+              // Figma applies `opacities/disabled` to this group as its own
+              // group opacity rather than swapping the icon/text colors, so
+              // the low-battery warning color stays recognizable while
+              // dimmed. DSBatteryIndicator exposes no disabled state, so the
+              // opacity is applied around it.
+              Opacity(
+                opacity: enabled ? 1 : theme.disabledOpacity,
+                child: DSBatteryIndicator(
+                  batteryLevel: batteryPercent,
+                  lowLevelThreshold: lowBatteryThreshold,
+                ),
+              ),
+            ],
+          );
+
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      // Figma specifies a `4px 0px` gap: the horizontal separation is already
+      // provided by the divider box, so only the run spacing is non-zero.
+      runSpacing: theme.sublineRowRunSpacing,
       children: [
-        if (subline != null) Flexible(child: DSText(subline, style: sublineStyle)),
-        if (subline != null && batteryPercent != null)
-          // Purely decorative separator between the subline and the battery
-          // indicator; assistive tech should not announce it.
-          ExcludeSemantics(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: theme.dividerSpacing),
-              child: Text('·', style: sublineStyle),
-            ),
-          ),
-        if (batteryPercent != null)
-          _BatteryGroup(percent: batteryPercent, enabled: enabled, theme: theme),
+        // Once the battery unit wraps away, the subline gets the card's full
+        // content width, which is the behavior the Figma node describes. The
+        // DSText ellipsis only ever engages for a subline longer than the
+        // whole card — the reference node would silently clip there, which
+        // would drop the text with no tooltip and no way to read it.
+        if (subline != null) DSText(subline, style: sublineStyle),
+        ?batteryUnit,
       ],
     );
   }
-}
-
-class _BatteryGroup extends StatelessWidget {
-  const _BatteryGroup({required this.percent, required this.enabled, required this.theme});
-
-  final int percent;
-  final bool enabled;
-  final DeviceCardThemeData theme;
-
-  @override
-  Widget build(BuildContext context) {
-    final clamped = percent.clamp(0, 100);
-    final region = DSRegion.of(context);
-    final formatted =
-        NumberFormat.percentPattern(region.localizations.localeName).format(clamped / 100);
-
-    return Opacity(
-      opacity: enabled ? 1 : theme.disabledOpacity,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          DSIcon.small(iconRef: _batteryIconFor(clamped), color: theme.iconColorStandard),
-          SizedBox(width: theme.batteryIconSpacing),
-          DSText(
-            formatted,
-            style: theme.batteryTextStyle.copyWith(color: theme.textColorStandard),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Maps a battery percentage onto the closest DS battery glyph. The DS icon
-/// set only exports discrete levels (no continuous fill), so the mapping
-/// below buckets the range into five bands.
-DSIconRef _batteryIconFor(int percent) {
-  if (percent <= 10) return DSIcons.batteryEmpty;
-  if (percent <= 35) return DSIcons.batteryLow;
-  if (percent <= 65) return DSIcons.batteryMid;
-  if (percent <= 90) return DSIcons.batteryHigh;
-  return DSIcons.batteryFull;
 }

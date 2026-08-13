@@ -1,0 +1,154 @@
+h2. User Story
+
+As a clinician selecting among several connected devices, I want to see each device's thumbnail, name, and some device specific informations summarized in a single card, so that I can identify and pick the right device at a glance.
+
+----
+
+h2. Design Definition & Assets
+
+* *Figma Link:* [DeviceCard|https://www.figma.com/design/oY2AELOxR8s6HKYkCTAOQs/Equipment-Components?node-id=4837-19131]
+* *Flutter Component:* [device_card.dart|https://github.com/ds-thomasja/overarching/blob/main/lib/components/device_card/device_card.dart]
+* *Interaction Model:* The card is a single tap/keyboard-activatable surface. Tapping (or pressing Enter/Space while focused) fires {{onTap}}, but only when {{enabled == true}}, {{isLoading == false}}, and {{onTap != null}} — otherwise the card renders its visual state but does not respond to input. Where a tap navigates to, or what selecting the card is used for by the caller, is not defined by the component itself. {{selected}} is a purely visual flag driven by the caller; the card does not manage its own selection state or emit a selection-changed callback. {{isLoading}} puts the card into a non-interactive skeleton state without swapping to a separate placeholder layout — see Content Logic & Edge Cases.
+
+----
+
+h2. Component Props
+
+|| Prop || Type || Default || Description ||
+| {{name}} | String | required, no default | Primary device name/title; single line, ellipsis-truncated |
+| {{subline}} | String? | null | Secondary line, e.g. a serial number ("SN:865562"); wraps up to 2 lines |
+| {{thumbnail}} | Widget? | null | Widget rendered in the thumbnail slot; falls back to a plain {{var(--surface-subdued, #f5f5f5)}} placeholder box when omitted |
+| {{batteryPercent}} | int? | null | Battery level 0–100; the battery indicator is hidden entirely when null |
+| {{lowBatteryThreshold}} | int | 30 | At or below this battery level the battery icon switches to the critical color |
+| {{status}} | DeviceCardStatus? | DeviceCardStatus.online | Connectivity tag shown below the subline/battery row; null hides the tags row entirely |
+| {{selected}} | bool | false | Selected visual state |
+| {{enabled}} | bool | true | Enabled/disabled visual state and interactivity gate |
+| {{isLoading}} | bool | false | Puts the card into its skeleton loading state and disables interaction |
+| {{onTap}} | VoidCallback? | null | Tap callback; null makes the card non-interactive (no hover/press/focus visuals, not keyboard-activatable) |
+| {{focusNode}} | FocusNode? | null | {{Focus.focusNode}} passthrough |
+| {{autofocus}} | bool | false | {{Focus.autofocus}} passthrough |
+| {{width}} | double | 438 | Fixed card width |
+
+{{DeviceCardStatus}} enum values: {{online}} (renders a success-styled "Online" tag), {{offline}} (renders a neutral-styled "Offline" tag).
+
+----
+
+h2. Component Anatomy & Flutter Mapping
+
+|| Element || Flutter Widget || Documentation ||
+| Card root (accessibility + sizing + skeleton wrapper) | {{Semantics(button: true)}} + {{SizedBox(width: width)}} + {{DSSkeletonizer(enabled: isLoading)}} | [STORYBOOK LINK NEEDED — Skeletonizer] |
+| Card surface | {{DSSpaciousCard}} (body, tags, imageWidget, selected, onPressed, focusNode, autofocus) | [STORYBOOK LINK NEEDED — Card / DSSpaciousCard] |
+| Body content column | {{Column}} (crossAxisAlignment: start, mainAxisSize: min) | n/a |
+| Device name | {{DSText}} ({{textBaseStrong}}, color swaps standard/disabled) | [STORYBOOK LINK NEEDED — Text] |
+| Subline + battery flow row | {{_SublineFlow}} — custom {{SlottedMultiChildRenderObjectWidget}} | n/a — bespoke layout, no DS mapping (see Content Logic & Edge Cases for why a {{Wrap}} isn't used) |
+| Subline text | {{DSText}} (maxLines: 2, {{textBase}}) | [STORYBOOK LINK NEEDED — Text] |
+| "·" divider glyph | Directly painted via {{TextPainter}} inside {{_RenderSublineFlow}} — not a child widget | n/a — decorative, excluded from semantics |
+| Battery indicator | {{DSBatteryIndicator}} (batteryLevel, lowLevelThreshold), wrapped in {{Opacity}} when disabled | [STORYBOOK LINK NEEDED — Battery indicator] |
+| Tags row | {{[DSTag.status(text, statusType)]}}, wrapped in {{Opacity}} when disabled | [Tag|https://zeroheight.com/0b922d40b/v/0/p/40b4d0-tag] |
+| Thumbnail | {{ExcludeSemantics}} > {{ClipRRect(thumbnailBorderRadius)}} > {{thumbnail}} widget or {{ColoredBox(surface.subdued)}} fallback | n/a — image slot documented under the Card entry above |
+| Skeleton bones (loading) | Rendered ambiently by {{DSSkeletonizer}} / {{DSText}}'s own skeleton mode; not a separate hand-built tree | [Skeleton|https://zeroheight.com/0b922d40b/v/0/p/953907-skeleton] |
+
+----
+
+h2. Acceptance Criteria
+
+ - *Functional:*
+ -- When {{status}} is null, or {{isLoading}} is true, no tags row renders at all
+ -- When {{status == DeviceCardStatus.online}}, the tag renders text "Online" with success styling; when {{offline}}, "Offline" with neutral styling
+ -- When {{batteryPercent}} is null, the battery indicator and its divider glyph are both absent
+ -- When {{batteryPercent}} is set and the subline fits on a single line with room remaining, the "·" divider + battery indicator attach inline at the end of that line
+ -- When the subline has wrapped onto a second line, or there isn't room on the (single) first line, the battery indicator renders alone on one additional line below, and the divider is not rendered at all — not merely hidden
+ -- {{name}} truncates with an ellipsis after 1 line; {{subline}} truncates with an ellipsis after 2 lines — both via {{DSText}}, which also gives the full string a hover tooltip
+ -- At or below {{lowBatteryThreshold}} (default 30), the battery icon switches to the critical/low-level color; the percentage text color is unaffected
+ -- Tapping the card only fires {{onTap}} when {{enabled == true}} AND {{isLoading == false}} AND {{onTap != null}}
+ -- When {{isLoading == true}}, the tags row and the battery indicator are both suppressed regardless of {{status}}/{{batteryPercent}}; {{name}}/{{subline}} instead render as skeleton bones sized from the real strings passed in
+ -- {{thumbnail}} falls back to a plain {{var(--surface-subdued, #f5f5f5)}} placeholder box when omitted
+
+ - *States:*
+ -- Default (enabled, not selected, not loading): background {{var(--surface-standard, #ffffff)}}; border 1px {{var(--border-subdued, #ebebeb)}}
+ -- Hover: background {{var(--surface-hovered, #ebebeb)}}; border unchanged
+ -- Pressed: background {{var(--surface-pressed, #d7d7d7)}}; border unchanged
+ -- Focus: border 2px {{var(--border-focused, #71a2fe)}}; background reverts to {{var(--surface-standard, #ffffff)}}
+ -- Selected (resting): background {{var(--surface-selected-standard, #eaf5fa)}}; border unchanged (1px subdued)
+ -- Selected + Hover: background {{var(--surface-selected-hovered, #d5ebf6)}}
+ -- Selected + Pressed: background {{var(--surface-selected-pressed, #a8d5eb)}}
+ -- Selected + Focus: border 2px {{var(--border-focused, #71a2fe)}}; background {{var(--surface-selected-standard, #eaf5fa)}}
+ -- Disabled ({{enabled = false}}): card chrome (background/border) is identical to the Default/Selected-Default pairing above — disabled has no distinct card-chrome color of its own; the thumbnail, name/subline text block, battery group, and tags row each drop to {{var(--opacities-disabled, 0.4)}} opacity; name/subline additionally swap text color to {{var(--text-disabled, #8a8a8a)}}
+ -- Loading ({{isLoading = true}}): {{DSSkeletonizer}} renders the real name/subline content as bones at full opacity; the tags row and battery indicator are hidden outright rather than boned (see Content Logic & Edge Cases); the thumbnail renders as a bone via {{DSSpaciousCard}}'s own image-slot skeleton support, keeping its normal {{border/radius/small}} corner
+
+ - *A11y:*
+ -- The whole card exposes {{Semantics(button: true, enabled: enabled, selected: selected)}} unconditionally — role/enabled/selected state is announced even while non-interactive (disabled or loading)
+ -- Keyboard activation (Enter/Space) and mouse hover/press/focus visuals are provided by the underlying {{DSSpaciousCard}}
+ -- The thumbnail is wrapped in {{ExcludeSemantics}} — decorative, conveys no information beyond {{name}}/{{subline}}, so it is not announced as an unlabeled image
+ -- The "·" divider glyph is painted directly (not a child widget) and never enters the semantics tree
+
+ - *Visual Fidelity:*
+ -- *Card root:*
+ --- Sizing: width fixed at {{width}} (default 438px); height content-driven
+ --- Border-radius: {{var(--border-radius-standard, 12px)}}
+ --- Shadow: {{DSTokensData.shadows.elevation1}} — two layers: (0px, 1px) blur 1px spread 0px {{rgba(0,0,0,0.02)}}, and (0px, 2px) blur 8px spread 1px {{rgba(0,0,0,0.04)}}
+ --- Content padding: {{DSTokensData.spacing.layout.m}} = 24px (non-small form factor) — deliberately differs from the Figma node's own {{spacing/component/m}} = 16px; the built component follows the DS token rather than re-implementing the Figma chrome by hand
+ -- *Thumbnail:*
+ --- Sizing: {{DSTokensData.image.size.card}} = 128px (non-small) / 64px (small form factor) — deliberately differs from the Figma node's fixed 120×120px, same DS-wins-over-Figma rule as the card padding above
+ --- Corner radius: {{DSTokensData.border.radius.small}} — exact px value not present in the Figma variable set pulled for this node; [TOKEN NEEDED — confirm px value of border/radius/small with Design]
+ --- Fallback background: {{var(--surface-subdued, #f5f5f5)}}
+ -- *Device name:*
+ --- Font: Be Vietnam Pro · 16px · 600 (SemiBold) · 24px line-height · -0.4px letter-spacing — {{textBaseStrong}}
+ --- Color: {{var(--text-standard, #242424)}}, swapping to {{var(--text-disabled, #8a8a8a)}} when {{enabled = false}}
+ --- 1 line, ellipsis overflow
+ -- *Subline:*
+ --- Font: Be Vietnam Pro · 16px · 400 (Regular) · 24px line-height · -0.4px letter-spacing — {{textBase}}
+ --- Same color-swap rule as the name
+ --- Up to 2 lines, ellipsis overflow
+ -- *Divider glyph "·":*
+ --- Painted in the same style/color as the subline text
+ --- Centered inside a fixed {{spacing.component.m}} = 16px box
+ --- Only rendered when the battery indicator sits inline on the subline's first line
+ -- *Battery indicator:*
+ --- {{DSBatteryIndicator}}: 24×24px icon; gap {{spacing.component.xxs}} = 4px between icon and percentage text
+ --- Percentage text: Be Vietnam Pro · 14px · 600 (SemiBold) · 20px line-height · -0.35px letter-spacing — {{textSmStrong}}, color {{var(--text-standard, #242424)}}
+ --- Icon color: standard, or the critical/low-level color when {{batteryPercent <= lowLevelThreshold}}
+ --- Whole group wrapped in {{Opacity}} at {{var(--opacities-disabled, 0.4)}} when {{enabled = false}}
+ -- *Tag ({{DSTag.status}}):*
+ --- Text: Be Vietnam Pro · 12px · 400 · 16px line-height · -0.3px letter-spacing — {{textXs}}
+ --- Padding: 8px horizontal, 4px vertical ({{spacing.component.xs}} / {{spacing.component.xxs}}); pill radius {{var(--border-radius-pill, 999px)}}
+ --- Online: background {{var(--surface-success, #afe4c8)}}. Offline: background {{var(--surface-neutral-standard, #d7d7d7)}}
+ --- The whole tags row carries its own {{opacities/disabled}} group opacity when {{enabled = false}}, independently of the tag's own colors — with a single tag this is visually equivalent to dimming the tag directly
+ -- *Skeleton bones (loading):*
+ --- Fill: {{var(--surface-skeleton-1, #d7d7d7)}}; pill radius {{var(--border-radius-pill, 999px)}} for text bones
+ --- Bone width/height is derived from the real {{name}}/{{subline}} strings at layout time, not from a fixed constant — see Content Logic & Edge Cases
+
+----
+
+h2. Content Logic & Edge Cases
+
+* *Inline vs. own-line battery placement:* The "· + battery" unit only ever attaches inline to the subline's first line, and only when there is room. A subline that has already wrapped onto a second line never gets an inline battery next to that second line, even if there would be room — the battery always drops to its own line below in that case, and the divider is omitted entirely (not merely hidden) whenever the battery doesn't sit inline.
+* *No subline, battery present:* The battery indicator renders alone with no divider, since there is nothing to divide it from.
+* *Static Figma loading mock vs. real skeleton behavior:* The Figma node's "Disabled + loading" frame shows fixed-width skeleton pills ({{Skeleton/Pill/Width/M}} = 96px for the name, {{Skeleton/Pill/Width/L}} = 144px for the subline) and a thumbnail bone at {{border/radius/standard}}. The built component does not reproduce these as static constants: {{DSSkeletonizer}} derives each bone's width/height from the actual {{name}}/{{subline}} strings passed while {{isLoading}}, so callers should pass representative (or last-known) text rather than empty strings; and the thumbnail bone keeps the card's real {{border/radius/small}} corner rather than the mockup's {{border/radius/standard}} — real component behavior wins over the static mockup per the widget's own source documentation.
+* *Battery indicator has no built-in disabled/loading treatment:* {{DSBatteryIndicator}} exposes no disabled state and, as of {{lightning_core_ui v51.0.0}}, is not skeleton-aware (it neither wraps itself in the DS skeleton mechanism nor is listed among {{DSSkeletonizer}}'s supported widgets). The card works around this package gap by (a) wrapping it in a group {{Opacity}} for disabled dimming, and (b) hiding it outright while {{isLoading}}, rather than letting it render as sharp real content next to skeleton bones.
+* *Tags row absent while loading:* Matches the Figma "Disabled + loading" variant, which renders no tags row at all — this holds regardless of whatever {{status}} was passed.
+* *Interactivity gate:* The card is only tap/keyboard-interactive when {{enabled && !isLoading && onTap != null}}; otherwise it still renders the correct visual state for {{enabled}}/{{selected}}, but does not respond to input.
+* *Thumbnail radius layering:* {{DSSpaciousCard}} clips its image slot with the card's own {{border/radius/standard}}; the thumbnail is clipped a second time, inside that, at the smaller {{border/radius/small}} — this double-clip is intentional and produces the corner the Figma node specifies for the thumbnail specifically (distinct from the card's own corner).
+
+----
+
+h2. Responsiveness & Links
+
+* Fixed pixel width (default 438px via {{width}}); the component itself has no responsive breakpoints. Thumbnail size and content padding do respond to the DS token's small/non-small form-factor split (see Visual Fidelity), independently of any breakpoint logic in this widget.
+* Figma: [DeviceCard|https://www.figma.com/design/oY2AELOxR8s6HKYkCTAOQs/Equipment-Components?node-id=4837-19131]
+* Storybook: [STORYBOOK LINK NEEDED — Card / DSSpaciousCard]
+* Storybook: [STORYBOOK LINK NEEDED — Text / DSText]
+* Storybook: [STORYBOOK LINK NEEDED — Battery indicator / DSBatteryIndicator]
+* Storybook: [STORYBOOK LINK NEEDED — Skeletonizer]
+* ZeroHeight: [Tag|https://zeroheight.com/0b922d40b/v/0/p/40b4d0-tag]
+* ZeroHeight: [Skeleton|https://zeroheight.com/0b922d40b/v/0/p/953907-skeleton]
+
+----
+
+h2. Approvals
+
+||Team involved||Responsible||Status||
+|Design|[~Thomas.Jakob@dentsplysirona.com] ||
+|Product Management|[] ||
+|Product Owner|[] ||
+| | | |

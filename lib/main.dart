@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lightning_core_ui/lightning_core_ui.dart';
 
 import 'components/device_card/device_card.dart';
+import 'components/device_modal/device_modal.dart';
 
 void main() {
   runApp(const ComponentPreviewApp());
@@ -59,6 +60,7 @@ class _ComponentEntry {
 /// so the sidebar list order stays deterministic as components are added.
 final List<_ComponentEntry> _componentEntries = [
   const _ComponentEntry('DeviceCard', _DeviceCardPlayground()),
+  const _ComponentEntry('DeviceModal', _DeviceModalPlayground()),
 ]..sort((a, b) => a.name.compareTo(b.name));
 
 /// Shows one component at a time, selected from a sidebar listing every
@@ -408,4 +410,316 @@ class _DeviceCardPlaygroundState extends State<_DeviceCardPlayground> {
       ],
     );
   }
+}
+
+/// The two structurally different modes a [DeviceModal] can be opened in,
+/// matching its two named constructors.
+enum _DeviceModalDemoMode { selectDevice, deviceDetails }
+
+extension on _DeviceModalDemoMode {
+  String get label => switch (this) {
+        _DeviceModalDemoMode.selectDevice => 'Select device (list)',
+        _DeviceModalDemoMode.deviceDetails => 'Device details',
+      };
+}
+
+/// The segment labels of the details-mode segmented control, taken from the
+/// Figma mock.
+const List<String> _deviceModalSegments = ['DS Core', 'CEREC / Connect'];
+
+/// Live, controls-driven preview of [DeviceModal].
+///
+/// A modal is a route rather than an inline widget, so the preview area holds
+/// the button that opens it (via the DS `showDSModalDialog`) instead of the
+/// component itself. The controls on the right are read when the button is
+/// pressed: a DS modal route does not rebuild when the page behind its barrier
+/// rebuilds, so a knob flipped *while* the modal is open only takes effect the
+/// next time it is opened.
+class _DeviceModalPlayground extends StatefulWidget {
+  const _DeviceModalPlayground();
+
+  @override
+  State<_DeviceModalPlayground> createState() => _DeviceModalPlaygroundState();
+}
+
+class _DeviceModalPlaygroundState extends State<_DeviceModalPlayground> {
+  late final _nameController = TextEditingController(text: 'Primescan Connect');
+  late final _notificationController = TextEditingController(
+      text: 'Using the correct sensor helps ensure accurate readings and '
+          'prevents errors.');
+
+  _DeviceModalDemoMode _mode = _DeviceModalDemoMode.selectDevice;
+  int _deviceCount = 4;
+  bool _showNotification = true;
+  bool _showBattery = true;
+  bool _showSubline1 = true;
+  bool _showSubline2 = true;
+  bool _showStatusTag = true;
+  bool _showSegmentedControl = true;
+  bool _showProgress = true;
+
+  /// The outcome of the last closed modal, echoed under the open button so the
+  /// callbacks are observable without a debug console.
+  String? _lastOutcome;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _notificationController.dispose();
+    super.dispose();
+  }
+
+  String? get _notificationMessage {
+    if (!_showNotification) return null;
+    final message = _notificationController.text;
+    return message.isEmpty ? null : message;
+  }
+
+  /// The selectable devices of the list mode: full cards, per the Figma
+  /// `details=false` variant.
+  List<DeviceModalDevice> get _selectableDevices => [
+        for (var i = 0; i < _deviceCount; i++)
+          DeviceModalDevice(
+            name: _nameController.text,
+            subline: 'SN:86556${i + 1}',
+            batteryPercent: _showBattery ? 88 - i * 7 : null,
+            status: _showStatusTag
+                ? (i.isEven ? DeviceCardStatus.online : DeviceCardStatus.offline)
+                : null,
+          ),
+      ];
+
+  /// The switchable devices of the details mode: name and subline only, per the
+  /// Figma `list` variant.
+  List<DeviceModalDevice> get _otherDevices => [
+        for (var i = 0; i < _deviceCount; i++)
+          const DeviceModalDevice(name: 'Title', subline: 'Description'),
+      ];
+
+  Future<void> _openModal() async {
+    final outcome = await showDSModalDialog<String>(
+      context: context,
+      builder: (context, pop) => _DeviceModalDemo(
+        mode: _mode,
+        deviceName: _nameController.text,
+        selectableDevices: _selectableDevices,
+        otherDevices: _otherDevices,
+        notificationMessage: _notificationMessage,
+        batteryPercent: _showBattery ? 88 : null,
+        subline1: _showSubline1 ? 'Subline-1' : null,
+        subline2: _showSubline2 ? 'Subline-2' : null,
+        status: _showStatusTag ? DeviceCardStatus.online : null,
+        segments: _showSegmentedControl ? _deviceModalSegments : const [],
+        progress: _showProgress
+            ? const DeviceModalProgress(
+                label: 'Loading description...',
+                value: 0.4,
+              )
+            : null,
+        pop: pop,
+      ),
+    );
+    if (!mounted) return;
+    setState(() => _lastOutcome = outcome ?? 'Dismissed');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = DSTokens.of(context);
+    final lastOutcome = _lastOutcome;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.all(tokens.spacing.layout.l),
+            child: _Section(
+              title: 'DeviceModal',
+              caption: 'Configure the parameters on the right, then open the '
+                  'modal. The controls are read when it opens.',
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DSButton.primary(
+                      buttonText: 'Open DeviceModal',
+                      onPressed: _openModal,
+                    ),
+                    if (lastOutcome != null) ...[
+                      SizedBox(height: tokens.spacing.component.m),
+                      Text(
+                        'Last outcome: $lastOutcome',
+                        style: tokens.text.textSm
+                            .copyWith(color: tokens.text.subdued),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        const VerticalDivider(width: 1),
+        _ControlsPanel(
+          children: [
+            _ControlField(
+              label: 'Mode',
+              child: DSDropdown<_DeviceModalDemoMode>(
+                items: [
+                  for (final mode in _DeviceModalDemoMode.values)
+                    DSDropdownItem(value: mode, title: mode.label),
+                ],
+                value: _mode,
+                onChanged: (value) => setState(() => _mode = value ?? _mode),
+              ),
+            ),
+            _ControlField(
+              label: 'Device name',
+              child: DSInput(
+                controller: _nameController,
+                onChanged: (_) => setState(() {}),
+              ),
+            ),
+            _ControlField(
+              label: 'Notification message',
+              child: DSInput(
+                controller: _notificationController,
+                maxLines: 3,
+                onChanged: (_) => setState(() {}),
+              ),
+            ),
+            _ControlField(
+              label: 'Devices in list',
+              child: DSDropdown<int>(
+                items: [
+                  for (final count in [0, 1, 2, 4])
+                    DSDropdownItem(value: count, title: '$count'),
+                ],
+                value: _deviceCount,
+                onChanged: (value) =>
+                    setState(() => _deviceCount = value ?? _deviceCount),
+              ),
+            ),
+            DSSwitch(
+              label: 'Notification',
+              value: _showNotification,
+              onChanged: (value) => setState(() => _showNotification = value),
+            ),
+            DSSwitch(
+              label: 'Battery',
+              value: _showBattery,
+              onChanged: (value) => setState(() => _showBattery = value),
+            ),
+            DSSwitch(
+              label: 'Status tag',
+              value: _showStatusTag,
+              onChanged: (value) => setState(() => _showStatusTag = value),
+            ),
+            DSSwitch(
+              label: 'Subline 1',
+              value: _showSubline1,
+              onChanged: (value) => setState(() => _showSubline1 = value),
+            ),
+            DSSwitch(
+              label: 'Subline 2',
+              value: _showSubline2,
+              onChanged: (value) => setState(() => _showSubline2 = value),
+            ),
+            DSSwitch(
+              label: 'Segmented control',
+              value: _showSegmentedControl,
+              onChanged: (value) =>
+                  setState(() => _showSegmentedControl = value),
+            ),
+            DSSwitch(
+              label: 'Progress card',
+              value: _showProgress,
+              onChanged: (value) => setState(() => _showProgress = value),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// The [DeviceModal] instance shown by the playground.
+///
+/// A [StatefulWidget] of its own because the segmented-control selection has to
+/// update *inside* the open modal, and a DS modal route does not rebuild when
+/// the page behind its barrier does.
+class _DeviceModalDemo extends StatefulWidget {
+  const _DeviceModalDemo({
+    required this.mode,
+    required this.deviceName,
+    required this.selectableDevices,
+    required this.otherDevices,
+    required this.notificationMessage,
+    required this.batteryPercent,
+    required this.subline1,
+    required this.subline2,
+    required this.status,
+    required this.segments,
+    required this.progress,
+    required this.pop,
+  });
+
+  final _DeviceModalDemoMode mode;
+  final String deviceName;
+  final List<DeviceModalDevice> selectableDevices;
+  final List<DeviceModalDevice> otherDevices;
+  final String? notificationMessage;
+  final int? batteryPercent;
+  final String? subline1;
+  final String? subline2;
+  final DeviceCardStatus? status;
+  final List<String> segments;
+  final DeviceModalProgress? progress;
+  final Pop<String> pop;
+
+  @override
+  State<_DeviceModalDemo> createState() => _DeviceModalDemoState();
+}
+
+class _DeviceModalDemoState extends State<_DeviceModalDemo> {
+  String? _selectedSegment;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedSegment = widget.segments.firstOrNull;
+  }
+
+  @override
+  Widget build(BuildContext context) => switch (widget.mode) {
+        _DeviceModalDemoMode.selectDevice => DeviceModal.selectDevice(
+            devices: widget.selectableDevices,
+            notificationMessage: widget.notificationMessage,
+            onClose: widget.pop,
+            onConfirm: (index) => widget.pop(
+              index == null ? 'Confirmed with no selection' : 'Confirmed #$index',
+            ),
+          ),
+        _DeviceModalDemoMode.deviceDetails => DeviceModal.deviceDetails(
+            device: DeviceModalDeviceDetails(
+              name: widget.deviceName,
+              subline1: widget.subline1,
+              subline2: widget.subline2,
+              batteryPercent: widget.batteryPercent,
+              status: widget.status,
+            ),
+            otherDevices: widget.otherDevices,
+            onOtherDeviceSelected: (index) =>
+                widget.pop('Switched to other device #$index'),
+            notificationMessage: widget.notificationMessage,
+            segments: widget.segments,
+            selectedSegment: _selectedSegment,
+            onSegmentChanged: (value) =>
+                setState(() => _selectedSegment = value),
+            progress: widget.progress,
+            onClose: widget.pop,
+            onSwitchDevice: () => widget.pop('Switch device pressed'),
+          ),
+      };
 }

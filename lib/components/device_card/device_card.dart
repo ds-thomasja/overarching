@@ -13,6 +13,28 @@ enum DeviceCardStatus {
   offline,
 }
 
+/// How a [DeviceCardStatus] is presented as a DS status tag.
+///
+/// Exposed so widgets that compose *with* [DeviceCard] — e.g. `DeviceModal`,
+/// which shows the focused device's status in its own header row rather than on
+/// a card — render exactly the same tag instead of duplicating the mapping.
+extension DeviceCardStatusPresentation on DeviceCardStatus {
+  /// The tag label.
+  ///
+  /// Hardcoded English, like the rest of this component: the project has no
+  /// localizations of its own yet, and DS only localizes its own strings.
+  String get label => switch (this) {
+        DeviceCardStatus.online => 'Online',
+        DeviceCardStatus.offline => 'Offline',
+      };
+
+  /// The DS status tag styling.
+  DSStatusTagType get tagType => switch (this) {
+        DeviceCardStatus.online => DSStatusTagType.success,
+        DeviceCardStatus.offline => DSStatusTagType.neutral,
+      };
+}
+
 /// A selectable card summarizing a connected device: thumbnail, name,
 /// serial/status line, optional battery level, and a connectivity status tag.
 ///
@@ -164,11 +186,8 @@ class DeviceCard extends StatelessWidget {
               Opacity(
                 opacity: enabled ? 1 : theme.disabledOpacity,
                 child: DSTag.status(
-                  text:
-                      status == DeviceCardStatus.online ? 'Online' : 'Offline',
-                  statusType: status == DeviceCardStatus.online
-                      ? DSStatusTagType.success
-                      : DSStatusTagType.neutral,
+                  text: status.label,
+                  statusType: status.tagType,
                 ),
               ),
             ],

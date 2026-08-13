@@ -46,19 +46,19 @@ class ComponentPreviewApp extends StatelessWidget {
   }
 }
 
-/// One entry in the component sidebar: a display name plus the section
-/// widget that renders that component's example states.
+/// One entry in the component sidebar: a display name plus the playground
+/// widget that renders that component's live, controls-driven preview.
 class _ComponentEntry {
-  const _ComponentEntry(this.name, this.section);
+  const _ComponentEntry(this.name, this.playground);
 
   final String name;
-  final Widget section;
+  final Widget playground;
 }
 
 /// The components available in this gallery, ordered alphabetically by name
 /// so the sidebar list order stays deterministic as components are added.
 final List<_ComponentEntry> _componentEntries = [
-  const _ComponentEntry('DeviceCard', _DeviceCardSection()),
+  const _ComponentEntry('DeviceCard', _DeviceCardPlayground()),
 ]..sort((a, b) => a.name.compareTo(b.name));
 
 /// Shows one component at a time, selected from a sidebar listing every
@@ -92,20 +92,24 @@ class _ComponentGalleryPageState extends State<ComponentGalleryPage> {
             ),
             const VerticalDivider(width: 1),
             Expanded(
-              child: SingleChildScrollView(
-                padding: EdgeInsets.all(tokens.spacing.layout.l),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: EdgeInsets.all(tokens.spacing.layout.l),
+                    child: Text(
                       'Overarching Component Gallery',
                       style: tokens.text.headingXl
                           .copyWith(color: tokens.text.standard),
                     ),
-                    SizedBox(height: tokens.spacing.layout.l),
-                    selected.section,
-                  ],
-                ),
+                  ),
+                  Expanded(
+                    // Each entry's playground owns both the live preview
+                    // (center) and the parameter controls (right sidebar) so
+                    // the two stay in sync via one shared piece of state.
+                    child: selected.playground,
+                  ),
+                ],
               ),
             ),
           ],
@@ -198,7 +202,8 @@ class _ComponentSidebarItem extends StatelessWidget {
   }
 }
 
-/// A titled block with an optional caption, used to group gallery examples.
+/// A titled block with an optional caption, used to introduce a component's
+/// live preview area.
 class _Section extends StatelessWidget {
   const _Section({required this.title, this.caption, required this.child});
 
@@ -234,49 +239,166 @@ class _Section extends StatelessWidget {
   }
 }
 
-/// The DeviceCard examples: default, selected, offline/disabled, and
-/// loading states, laid out in a wrap so they reflow at any sidebar width.
-class _DeviceCardSection extends StatelessWidget {
-  const _DeviceCardSection();
+/// The fixed-width right-hand sidebar holding a component's live parameter
+/// controls (text inputs, dropdowns, toggles, ...).
+class _ControlsPanel extends StatelessWidget {
+  const _ControlsPanel({required this.children});
+
+  final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
     final tokens = DSTokens.of(context);
 
-    return _Section(
-      title: 'DeviceCard',
-      caption: 'Default, selected, offline/disabled, and loading states.',
-      child: Wrap(
-        spacing: tokens.spacing.layout.l,
-        runSpacing: tokens.spacing.layout.l,
-        children: [
-          DeviceCard(
-            name: 'Primescan Connect',
-            subline: 'SN:865562',
-            batteryPercent: 82,
-            onTap: () {},
+    return SizedBox(
+      width: 280,
+      child: ColoredBox(
+        color: tokens.background.dimmer,
+        child: SingleChildScrollView(
+          padding: EdgeInsets.all(tokens.spacing.layout.m),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Controls',
+                style: tokens.text.headingBase
+                    .copyWith(color: tokens.text.standard),
+              ),
+              SizedBox(height: tokens.spacing.layout.s),
+              for (final child in children) ...[
+                child,
+                SizedBox(height: tokens.spacing.component.l),
+              ],
+            ],
           ),
-          DeviceCard(
-            name: 'Primescan Connect',
-            subline: 'SN:865562',
-            batteryPercent: 24,
-            selected: true,
-            onTap: () {},
-          ),
-          const DeviceCard(
-            name: 'Primescan Connect',
-            subline: 'SN:865562',
-            batteryPercent: 45,
-            status: DeviceCardStatus.offline,
-            enabled: false,
-          ),
-          const DeviceCard(
-            name: 'Primescan Connect',
-            subline: 'SN:865562',
-            isLoading: true,
-          ),
-        ],
+        ),
       ),
+    );
+  }
+}
+
+/// A single labeled control (text input, dropdown, ...) in a [_ControlsPanel].
+class _ControlField extends StatelessWidget {
+  const _ControlField({required this.label, required this.child});
+
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DSLabel(label: label),
+        const SizedBox(height: 4),
+        child,
+      ],
+    );
+  }
+}
+
+/// The three demo states offered by the DeviceCard playground's "State"
+/// dropdown, covering the card's non-loading enabled/disabled split plus its
+/// loading state.
+enum _DeviceCardDemoState { default_, disabled, loading }
+
+extension on _DeviceCardDemoState {
+  String get label => switch (this) {
+        _DeviceCardDemoState.default_ => 'Default',
+        _DeviceCardDemoState.disabled => 'Disabled',
+        _DeviceCardDemoState.loading => 'Loading',
+      };
+}
+
+/// Live, controls-driven preview of [DeviceCard]: a title and subline text
+/// input, a state dropdown (default/disabled/loading), and a toggle for
+/// whether the battery indicator is shown.
+class _DeviceCardPlayground extends StatefulWidget {
+  const _DeviceCardPlayground();
+
+  @override
+  State<_DeviceCardPlayground> createState() => _DeviceCardPlaygroundState();
+}
+
+class _DeviceCardPlaygroundState extends State<_DeviceCardPlayground> {
+  late final _titleController =
+      TextEditingController(text: 'Primescan Connect');
+  late final _sublineController = TextEditingController(text: 'SN:865562');
+  _DeviceCardDemoState _state = _DeviceCardDemoState.default_;
+  bool _showBattery = true;
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _sublineController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = DSTokens.of(context);
+
+    final preview = DeviceCard(
+      name: _titleController.text,
+      subline:
+          _sublineController.text.isEmpty ? null : _sublineController.text,
+      batteryPercent: _showBattery ? 72 : null,
+      enabled: _state != _DeviceCardDemoState.disabled,
+      isLoading: _state == _DeviceCardDemoState.loading,
+      onTap: () {},
+    );
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.all(tokens.spacing.layout.l),
+            child: _Section(
+              title: 'DeviceCard',
+              caption: 'Edit the parameters on the right to update the '
+                  'preview live.',
+              child: Center(child: preview),
+            ),
+          ),
+        ),
+        const VerticalDivider(width: 1),
+        _ControlsPanel(
+          children: [
+            _ControlField(
+              label: 'Title',
+              child: DSInput(
+                controller: _titleController,
+                onChanged: (_) => setState(() {}),
+              ),
+            ),
+            _ControlField(
+              label: 'Subline',
+              child: DSInput(
+                controller: _sublineController,
+                onChanged: (_) => setState(() {}),
+              ),
+            ),
+            _ControlField(
+              label: 'State',
+              child: DSDropdown<_DeviceCardDemoState>(
+                items: [
+                  for (final state in _DeviceCardDemoState.values)
+                    DSDropdownItem(value: state, title: state.label),
+                ],
+                value: _state,
+                onChanged: (value) =>
+                    setState(() => _state = value ?? _state),
+              ),
+            ),
+            DSSwitch(
+              label: 'Battery',
+              value: _showBattery,
+              onChanged: (value) => setState(() => _showBattery = value),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

@@ -95,16 +95,19 @@ class DeviceCard extends StatelessWidget {
   /// pass representative placeholder (or last-known) strings rather than empty
   /// ones.
   ///
-  /// Two parts of the card are not covered by that mechanism:
+  /// Two parts of the card are not covered by that mechanism, and are instead
+  /// suppressed outright while loading:
   ///
-  /// - The tags row is suppressed outright, matching the Figma
-  ///   "Disabled + loading" variant, which renders no tags row at all.
-  /// - [DSBatteryIndicator] is not skeleton-aware in `lightning_core_ui`
-  ///   v51.0.0 — it neither wraps itself in the DS skeleton wrapper nor is
-  ///   listed among `DSSkeletonizer`'s supported widgets — so the battery
-  ///   icon and percentage keep rendering as real content while loading.
-  ///   This is a gap in the DS package rather than something this card works
-  ///   around, so that it disappears on its own once the package closes it.
+  /// - The tags row, matching the Figma "Disabled + loading" variant, which
+  ///   renders no tags row at all.
+  /// - The battery indicator: [DSBatteryIndicator] is not skeleton-aware in
+  ///   `lightning_core_ui` v51.0.0 — it neither wraps itself in the DS
+  ///   skeleton wrapper nor is listed among `DSSkeletonizer`'s supported
+  ///   widgets — so left alone it would keep rendering as sharp, real content
+  ///   (icon and percentage) next to the skeleton bones around it. This card
+  ///   works around that package gap by hiding the battery indicator outright
+  ///   while loading, the same way the tags row is hidden, rather than
+  ///   showing a mismatched mix of real and skeleton content.
   ///
   /// The thumbnail *is* covered: `DSSpaciousCard` replaces its image slot
   /// with a bone while skeleton mode is on, and this card always supplies an
@@ -144,6 +147,7 @@ class DeviceCard extends StatelessWidget {
         batteryPercent: batteryPercent,
         lowBatteryThreshold: lowBatteryThreshold,
         enabled: enabled,
+        isLoading: isLoading,
         theme: theme,
       ),
       // The Figma node renders no tags row at all while loading.
@@ -273,6 +277,7 @@ class _DeviceCardBody extends StatelessWidget {
     required this.batteryPercent,
     required this.lowBatteryThreshold,
     required this.enabled,
+    required this.isLoading,
     required this.theme,
   });
 
@@ -281,6 +286,7 @@ class _DeviceCardBody extends StatelessWidget {
   final int? batteryPercent;
   final int lowBatteryThreshold;
   final bool enabled;
+  final bool isLoading;
   final DeviceCardThemeData theme;
 
   @override
@@ -301,7 +307,8 @@ class _DeviceCardBody extends StatelessWidget {
         DSText(name, style: theme.nameTextStyle.copyWith(color: textColor)),
         _SublineRow(
           subline: subline,
-          batteryPercent: batteryPercent,
+          // Hidden while loading: see [DeviceCard.isLoading].
+          batteryPercent: isLoading ? null : batteryPercent,
           lowBatteryThreshold: lowBatteryThreshold,
           textColor: textColor,
           enabled: enabled,

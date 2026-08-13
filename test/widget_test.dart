@@ -7,32 +7,51 @@ import 'package:overarching/components/device_card/device_card.dart';
 import 'package:overarching/main.dart';
 
 void main() {
-  testWidgets('Component gallery renders DeviceCard instances', (WidgetTester tester) async {
-    // A viewport large enough to lay out the Wrap without overflowing.
+  testWidgets('Component gallery renders a live, controls-driven DeviceCard',
+      (WidgetTester tester) async {
+    // A viewport large enough to lay out the sidebar, preview and controls
+    // panel without overflowing.
     tester.view.physicalSize = const Size(1600, 1200);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
     await tester.pumpWidget(const ComponentPreviewApp());
-    // Not pumpAndSettle: the loading DeviceCard's skeleton shimmer never
-    // stops animating, and DSText's tooltip-on-truncation measurement needs
-    // one extra frame after the first build to resolve.
+    // Not pumpAndSettle: the loading state's skeleton shimmer never stops
+    // animating, and DSText's tooltip-on-truncation measurement needs one
+    // extra frame after the first build to resolve.
     await tester.pump();
 
     // 'DeviceCard' appears both as the sidebar entry and the content
     // heading, since it's the only (and thus default-selected) component.
     expect(find.text('DeviceCard'), findsNWidgets(2));
 
-    expect(find.byType(DeviceCard), findsNWidgets(4));
-    expect(find.text('Primescan Connect'), findsNWidgets(4));
-    expect(find.text('Online'), findsNWidgets(2));
-    expect(find.text('Offline'), findsOneWidget);
+    // Exactly one live preview instance, driven by the controls panel.
+    // "Primescan Connect" appears twice: once as the card's DSText and once
+    // as the editable text of the "Title" control that drives it.
+    expect(find.byType(DeviceCard), findsOneWidget);
+    expect(find.text('Primescan Connect'), findsNWidgets(2));
+    expect(find.text('Online'), findsOneWidget);
 
-    // The card renders the real DSBatteryIndicator rather than a hand-built
-    // stand-in. Three of the four gallery cards supply a battery level; the
-    // percentage text confirms the non-small form factor branch is taken.
-    expect(find.byType(DSBatteryIndicator), findsNWidgets(3));
-    expect(find.text('82%'), findsOneWidget);
+    // The battery toggle defaults to on, rendering the real
+    // DSBatteryIndicator rather than a hand-built stand-in.
+    expect(find.byType(DSBatteryIndicator), findsOneWidget);
+    expect(find.text('72%'), findsOneWidget);
+
+    // The controls panel exposes the title/subline inputs, the state
+    // dropdown and the battery toggle.
+    final dropdownFinder =
+        find.byWidgetPredicate((widget) => widget is DSDropdown);
+    expect(find.byType(DSInput), findsNWidgets(2));
+    expect(dropdownFinder, findsOneWidget);
+    expect(find.byType(DSSwitch), findsOneWidget);
+
+    // Switching the state dropdown to "Loading" updates the live preview.
+    await tester.tap(dropdownFinder);
+    await tester.pump();
+    await tester.tap(find.text('Loading').last);
+    await tester.pump();
+
+    expect(find.byType(DeviceCard), findsOneWidget);
   });
 
   testWidgets('Component gallery renders with the dark DS theme', (WidgetTester tester) async {

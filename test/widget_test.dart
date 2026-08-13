@@ -1,6 +1,7 @@
 import 'dart:ui' show Size;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lightning_core_ui/lightning_core_ui.dart';
 
 import 'package:overarching/components/device_card/device_card.dart';
 import 'package:overarching/main.dart';
@@ -18,10 +19,20 @@ void main() {
     // one extra frame after the first build to resolve.
     await tester.pump();
 
+    // 'DeviceCard' appears both as the sidebar entry and the content
+    // heading, since it's the only (and thus default-selected) component.
+    expect(find.text('DeviceCard'), findsNWidgets(2));
+
     expect(find.byType(DeviceCard), findsNWidgets(4));
-    expect(find.text('Primescan Connect'), findsNWidgets(3));
-    expect(find.text('Online'), findsNWidgets(3));
+    expect(find.text('Primescan Connect'), findsNWidgets(4));
+    expect(find.text('Online'), findsNWidgets(2));
     expect(find.text('Offline'), findsOneWidget);
+
+    // The card renders the real DSBatteryIndicator rather than a hand-built
+    // stand-in. Three of the four gallery cards supply a battery level; the
+    // percentage text confirms the non-small form factor branch is taken.
+    expect(find.byType(DSBatteryIndicator), findsNWidgets(3));
+    expect(find.text('82%'), findsOneWidget);
   });
 
   testWidgets('Component gallery renders with the dark DS theme', (WidgetTester tester) async {

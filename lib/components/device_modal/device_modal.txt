@@ -85,12 +85,12 @@ h3. DeviceModalProgress
 h2. Component Anatomy & Flutter Mapping
 
 || Element || Flutter Widget || Documentation ||
-| Modal barrier, centering, route | {{showDSModalDialog}} — not part of this widget; caller-supplied | [STORYBOOK LINK NEEDED — Modal dialog] |
+| Modal barrier, centering, route | {{showDSModalDialog}} — not part of this widget; caller-supplied | [Modal dialog|https://storybook-coreui-d2-euw3.d.dscore.com/#/Components/Modal%20dialog] |
 | Modal surface (chrome) | {{_DeviceModalSurface}} — hand-composed, token-for-token rebuild of {{DSModalDialog}}'s chrome, with a configurable header-to-body gap (see Content Logic & Edge Cases for why) | n/a — bespoke |
 | Header row | {{Row}} (title + close button) inside {{Padding}} ({{surfaceHorizontalPadding}} + {{titlePadding}}) | n/a |
-| Title | Plain {{Text}} ({{titleTextStyle}} = heading2xl), 1 line, ellipsis overflow | n/a — deliberately not {{DSText}}, see Content Logic & Edge Cases |
+| Title | Plain {{Text}} ({{titleTextStyle}} = heading2xl), 1 line, ellipsis overflow | [Typography (Text)|https://storybook-coreui-d2-euw3.d.dscore.com/#/Foundation/Typography%20(Text)] — deliberately a plain {{Text}}, not {{DSText}}, see Content Logic & Edge Cases |
 | Close icon-button | {{DSButton.tertiary}} (icon: {{DSIcons.close}}, onPressed: onClose) | [Button|https://zeroheight.com/0b922d40b/v/0/p/156acf-button] |
-| Scrollable body | {{DSCustomScrollView}} (shrinkWrap: true, padding varies by mode) | [STORYBOOK LINK NEEDED — Custom scroll view] |
+| Scrollable body | {{DSCustomScrollView}} (shrinkWrap: true, padding varies by mode) | [Container scroll view|https://storybook-coreui-d2-euw3.d.dscore.com/#/Components/Container%20scroll%20view] (unconfirmed — this Storybook page's title suggests {{DSContainerScrollView}}, a separate export from {{DSCustomScrollView}}; confirm with Design which widget it documents) |
 | Body content stack | {{_Stack}} — custom {{Column}} inserting a gap after each non-null {{_Block}} child | n/a — bespoke layout helper |
 | Inline notification (both modes) | {{DSInlineNotification}} (message, notificationType, onClose) | [Inline notification|https://zeroheight.com/0b922d40b/v/0/p/5697b4-inline-notification] |
 | Device row (both modes' lists) | {{DeviceCard}} (width: double.infinity, name, subline, thumbnail, batteryPercent, lowBatteryThreshold, status, enabled, selected, onTap) | [DeviceCard|../device_card/device_card.txt] |
@@ -99,12 +99,12 @@ h2. Component Anatomy & Flutter Mapping
 | Switch device button (details mode) | {{DSButton.secondary}} (buttonText: footerButtonLabel, onPressed: onSwitchDevice) | [Button|https://zeroheight.com/0b922d40b/v/0/p/156acf-button] |
 | Details info row | {{_DetailsInfoRow}} — custom {{Wrap}} of sublines, {{DSBatteryIndicator}} and {{DSTag.status}}, each preceded by a "·" divider except the first item | n/a — bespoke |
 | "·" divider (info row) | {{_InfoDivider}} — {{DSText}} inside {{ExcludeSemantics}} + fixed-width {{SizedBox}} | n/a — decorative |
-| Battery indicator (info row) | {{DSBatteryIndicator}} (batteryLevel, lowLevelThreshold) | [STORYBOOK LINK NEEDED — Battery indicator] |
+| Battery indicator (info row) | {{DSBatteryIndicator}} (batteryLevel, lowLevelThreshold) | [Battery indicator|https://storybook-coreui-d2-euw3.d.dscore.com/#/Components/Battery%20indicator] |
 | Status tag (info row) | {{DSTag.status}} (text: status.label, statusType: status.tagType) | [Tag|https://zeroheight.com/0b922d40b/v/0/p/40b4d0-tag] |
 | Details image slot | {{_DetailsImage}} — {{ClipRRect}} around the {{image}} widget or a {{ColoredBox}} fallback, wrapped in {{ExcludeSemantics}}, top-centered | n/a — bespoke, fixed 240×240 (see Content Logic & Edge Cases) |
 | Segmented control | {{DSSegmentedControl.withTexts}} (stretch: true, selectedValue, onChanged, items: DSSegmentedControlItemWithText, each with {{enabled}} tied to onSegmentChanged) | [Segmented control|https://zeroheight.com/0b922d40b/v/0/p/53abd9-segmented-control] |
 | Progress card | {{_ProgressCard}} — hand-built bordered {{DecoratedBox}} (see Content Logic & Edge Cases for why) wrapping a {{DSProgressBar}} and a {{DSText}} label | n/a — bespoke chrome, real DS bar inside |
-| Progress bar | {{DSProgressBar}} (value: null for indeterminate, else 0.0–1.0) | [STORYBOOK LINK NEEDED — Progress bar] |
+| Progress bar | {{DSProgressBar}} (value: null for indeterminate, else 0.0–1.0) | [Progress bar|https://storybook-coreui-d2-euw3.d.dscore.com/#/Components/Progress%20bar] |
 | Selectable device list (select mode) | {{for}} loop of {{DeviceCard}} rows; {{selected}} reflects the pending highlight index, {{onTap}} either moves the highlight or calls {{onConfirm}} directly (per {{selectable}}) | n/a |
 | Dimmer | Painted by {{showDSModalDialog}}'s barrier, not by this widget | n/a |
 
@@ -178,7 +178,7 @@ h2. Acceptance Criteria
  --- Label: Be Vietnam Pro · 14px · 600 (SemiBold) · 24px line-height · -0.35px letter-spacing — {{textAction}}
  -- *Progress card:*
  --- Padding: {{var(--spacing-component-l, 24px)}}
- --- Border: 1px {{var(--border-width-standard, 1px)}} [TOKEN NEEDED — confirm hex value of {{border/standard}}; not present in the Figma variable set pulled for this node's default variant]
+ --- Border: 1px {{var(--border-width-standard, 1px)}} {{var(--border-subdued, #ebebeb)}}
  --- Corner radius: {{var(--border-radius-standard, 12px)}} — not specified by the Figma node itself; the DS card radius is used
  --- Background: {{var(--surface-standard, #ffffff)}}
  --- Gap bar→label: {{var(--spacing-component-s, 12px)}}
@@ -220,11 +220,11 @@ h2. Responsiveness & Links
 * Figma: [DeviceModal|https://www.figma.com/design/oY2AELOxR8s6HKYkCTAOQs/Equipment-Components?node-id=5098-5219]
 * Related component: [DeviceCard|../device_card/device_card.txt]
 * Storybook: [Button|https://zeroheight.com/0b922d40b/v/0/p/156acf-button]
-* Storybook: [STORYBOOK LINK NEEDED — Modal dialog / DSModalDialog]
-* Storybook: [STORYBOOK LINK NEEDED — Custom scroll view / DSCustomScrollView]
-* Storybook: [STORYBOOK LINK NEEDED — Battery indicator / DSBatteryIndicator]
-* Storybook: [STORYBOOK LINK NEEDED — Progress bar / DSProgressBar]
-* Storybook: [STORYBOOK LINK NEEDED — Text / DSText]
+* Storybook: [Modal dialog|https://storybook-coreui-d2-euw3.d.dscore.com/#/Components/Modal%20dialog]
+* Storybook: [Container scroll view|https://storybook-coreui-d2-euw3.d.dscore.com/#/Components/Container%20scroll%20view] (unconfirmed — confirm this covers {{DSCustomScrollView}}, not {{DSContainerScrollView}})
+* Storybook: [Battery indicator|https://storybook-coreui-d2-euw3.d.dscore.com/#/Components/Battery%20indicator]
+* Storybook: [Progress bar|https://storybook-coreui-d2-euw3.d.dscore.com/#/Components/Progress%20bar]
+* Storybook: [Typography (Text)|https://storybook-coreui-d2-euw3.d.dscore.com/#/Foundation/Typography%20(Text)]
 * ZeroHeight: [Inline notification|https://zeroheight.com/0b922d40b/v/0/p/5697b4-inline-notification]
 * ZeroHeight: [Tag|https://zeroheight.com/0b922d40b/v/0/p/40b4d0-tag]
 * ZeroHeight: [Segmented control|https://zeroheight.com/0b922d40b/v/0/p/53abd9-segmented-control]

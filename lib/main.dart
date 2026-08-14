@@ -434,7 +434,7 @@ enum _DeviceModalListType { default_, selectAndConfirm }
 
 extension on _DeviceModalListType {
   String get label => switch (this) {
-        _DeviceModalListType.default_ => 'Default',
+        _DeviceModalListType.default_ => 'One click selection',
         _DeviceModalListType.selectAndConfirm => 'Select and confirm',
       };
 

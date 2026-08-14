@@ -427,6 +427,20 @@ extension on _DeviceModalDemoMode {
 /// Figma mock.
 const List<String> _deviceModalSegments = ['DS Core', 'CEREC / Connect'];
 
+/// The two list-mode interaction styles offered by the "Type" dropdown,
+/// matching [DeviceModal.selectable]: a plain browsing list, or the
+/// selectable-plus-confirm interaction.
+enum _DeviceModalListType { default_, selectAndConfirm }
+
+extension on _DeviceModalListType {
+  String get label => switch (this) {
+        _DeviceModalListType.default_ => 'Default',
+        _DeviceModalListType.selectAndConfirm => 'Select and confirm',
+      };
+
+  bool get selectable => this == _DeviceModalListType.selectAndConfirm;
+}
+
 /// Live, controls-driven preview of [DeviceModal].
 ///
 /// A modal is a route rather than an inline widget, so the preview area holds
@@ -449,6 +463,7 @@ class _DeviceModalPlaygroundState extends State<_DeviceModalPlayground> {
           'prevents errors.');
 
   _DeviceModalDemoMode _mode = _DeviceModalDemoMode.selectDevice;
+  _DeviceModalListType _listType = _DeviceModalListType.selectAndConfirm;
   int _deviceCount = 4;
   bool _showNotification = true;
   bool _showBattery = true;
@@ -501,6 +516,7 @@ class _DeviceModalPlaygroundState extends State<_DeviceModalPlayground> {
       context: context,
       builder: (context, pop) => _DeviceModalDemo(
         mode: _mode,
+        selectable: _listType.selectable,
         deviceName: _nameController.text,
         selectableDevices: _selectableDevices,
         otherDevices: _otherDevices,
@@ -574,6 +590,19 @@ class _DeviceModalPlaygroundState extends State<_DeviceModalPlayground> {
                 onChanged: (value) => setState(() => _mode = value ?? _mode),
               ),
             ),
+            if (_mode == _DeviceModalDemoMode.selectDevice)
+              _ControlField(
+                label: 'Type',
+                child: DSDropdown<_DeviceModalListType>(
+                  items: [
+                    for (final type in _DeviceModalListType.values)
+                      DSDropdownItem(value: type, title: type.label),
+                  ],
+                  value: _listType,
+                  onChanged: (value) =>
+                      setState(() => _listType = value ?? _listType),
+                ),
+              ),
             _ControlField(
               label: 'Device name',
               child: DSInput(
@@ -652,6 +681,7 @@ class _DeviceModalPlaygroundState extends State<_DeviceModalPlayground> {
 class _DeviceModalDemo extends StatefulWidget {
   const _DeviceModalDemo({
     required this.mode,
+    required this.selectable,
     required this.deviceName,
     required this.selectableDevices,
     required this.otherDevices,
@@ -666,6 +696,7 @@ class _DeviceModalDemo extends StatefulWidget {
   });
 
   final _DeviceModalDemoMode mode;
+  final bool selectable;
   final String deviceName;
   final List<DeviceModalDevice> selectableDevices;
   final List<DeviceModalDevice> otherDevices;
@@ -695,6 +726,7 @@ class _DeviceModalDemoState extends State<_DeviceModalDemo> {
   Widget build(BuildContext context) => switch (widget.mode) {
         _DeviceModalDemoMode.selectDevice => DeviceModal.selectDevice(
             devices: widget.selectableDevices,
+            selectable: widget.selectable,
             notificationMessage: widget.notificationMessage,
             onClose: widget.pop,
             onConfirm: (index) => widget.pop(

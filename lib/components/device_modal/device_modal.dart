@@ -223,6 +223,7 @@ class DeviceModal extends StatefulWidget {
     required this.title,
     required this.details,
     required this.devices,
+    required this.selectable,
     required this.onClose,
     required this.onConfirm,
     required this.onOtherDeviceSelected,
@@ -253,6 +254,10 @@ class DeviceModal extends StatefulWidget {
   /// self-contained interaction, and hoisting a selection that is discarded on
   /// close into every caller buys nothing. Seed it with
   /// [initiallySelectedIndex], which is read once, on first build.
+  ///
+  /// Set [selectable] to `false` for a plain, non-interactive list — e.g. a
+  /// "Default" browsing view where Confirm does not depend on a per-row
+  /// selection.
   DeviceModal.selectDevice({
     Key? key,
     required List<DeviceModalDevice> devices,
@@ -261,6 +266,7 @@ class DeviceModal extends StatefulWidget {
     int? initiallySelectedIndex,
     String title = 'Select device',
     String confirmLabel = 'Confirm',
+    bool selectable = true,
     String? notificationMessage,
     DSNotificationType notificationType = DSNotificationType.information,
     VoidCallback? onNotificationClose,
@@ -270,6 +276,7 @@ class DeviceModal extends StatefulWidget {
           title: title,
           details: null,
           devices: devices,
+          selectable: selectable,
           onClose: onClose,
           onConfirm: onConfirm,
           onOtherDeviceSelected: null,
@@ -315,6 +322,7 @@ class DeviceModal extends StatefulWidget {
           title: device.name,
           details: device,
           devices: otherDevices,
+          selectable: true,
           onClose: onClose,
           onConfirm: null,
           onOtherDeviceSelected: onOtherDeviceSelected,
@@ -340,6 +348,11 @@ class DeviceModal extends StatefulWidget {
   /// The devices rendered as [DeviceCard]s: the selectable ones in list mode,
   /// the switchable ones in details mode.
   final List<DeviceModalDevice> devices;
+
+  /// Whether the [devices] cards respond to taps and show the pending
+  /// selection highlight in list mode. Ignored in details mode, where
+  /// interactivity is instead governed by [onOtherDeviceSelected].
+  final bool selectable;
 
   /// Called when the header close button is pressed.
   ///
@@ -479,7 +492,8 @@ class _DeviceModalState extends State<DeviceModal> {
   }
 
   /// The `details=false` body: the optional notification followed by one
-  /// selectable [DeviceCard] per device.
+  /// [DeviceCard] per device, selectable when [DeviceModal.selectable] is
+  /// `true`.
   Widget _buildSelectBody(DeviceModalThemeData theme) => _Stack(
         spacing: theme.blockSpacing,
         children: [
@@ -487,8 +501,10 @@ class _DeviceModalState extends State<DeviceModal> {
           for (var i = 0; i < widget.devices.length; i++)
             _buildDeviceCard(
               widget.devices[i],
-              selected: i == _selectedIndex,
-              onTap: () => setState(() => _selectedIndex = i),
+              selected: widget.selectable && i == _selectedIndex,
+              onTap: widget.selectable
+                  ? () => setState(() => _selectedIndex = i)
+                  : null,
             ),
         ],
       );

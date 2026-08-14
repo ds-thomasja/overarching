@@ -132,9 +132,10 @@ void main() {
     expect(find.byType(DeviceModal), findsNothing);
 
     // The controls panel: the device-name and notification-message inputs, the
-    // mode and device-count dropdowns, and one toggle per Figma boolean.
+    // mode, type and device-count dropdowns (type only shows in select-device
+    // mode, the playground's default), and one toggle per Figma boolean.
     expect(find.byType(DSInput), findsNWidgets(2));
-    expect(_byGenericType<DSDropdown>(), findsNWidgets(2));
+    expect(_byGenericType<DSDropdown>(), findsNWidgets(3));
     expect(find.byType(DSSwitch), findsNWidgets(7));
   });
 

@@ -17,6 +17,11 @@ const String _dividerGlyph = '·';
 /// point of change if such a token is introduced.
 const double _detailsImageSize = 240;
 
+/// Default copy for [DeviceModal.selectDevice]'s selection-validation
+/// notification, shown when Confirm is pressed with no device selected.
+const String _defaultSelectionRequiredMessage =
+    'Please select a device before continue';
+
 /// One device rendered as a [DeviceCard] inside a [DeviceModal].
 ///
 /// Used for both device lists a [DeviceModal] can show:
@@ -200,7 +205,7 @@ class DeviceModalProgress {
 /// The design lives in Figma "Equipment-Components", node `5098:5219`.
 ///
 /// - Header-to-body and body-to-toolbar gaps: reproduced exactly, per mode —
-///   0 above the body in details mode, 8 in list mode, 8 below it in both. This
+///   0 above the body in details mode, 16 in list mode, 16 below it in both. This
 ///   is the one place where Figma deliberately wins over the DS chrome, at the
 ///   cost of rebuilding the surface; see [_DeviceModalSurface].
 /// - Width: Figma shows a fixed 486. DS modal widths are responsive; 486 is
@@ -230,6 +235,7 @@ class DeviceModal extends StatefulWidget {
     required this.onSwitchDevice,
     required this.footerButtonLabel,
     required this.initiallySelectedIndex,
+    required this.selectionRequiredMessage,
     required this.notificationMessage,
     required this.notificationType,
     required this.onNotificationClose,
@@ -255,9 +261,17 @@ class DeviceModal extends StatefulWidget {
   /// close into every caller buys nothing. Seed it with
   /// [initiallySelectedIndex], which is read once, on first build.
   ///
-  /// Set [selectable] to `false` for a plain, non-interactive list — e.g. a
-  /// "Default" browsing view where Confirm does not depend on a per-row
-  /// selection.
+  /// Set [selectable] to `false` for a "one-click" list: there is no footer
+  /// button at all — tapping any card calls [onConfirm] immediately, with
+  /// that card's index, instead of moving a highlight. [confirmLabel] and
+  /// [selectionRequiredMessage] are then unused.
+  ///
+  /// When [selectable] is `true` (the default), tapping a card only moves the
+  /// pending highlight; Confirm is gated on a selection existing, and pressing
+  /// it with none made shows [selectionRequiredMessage] as an informational
+  /// notification instead of calling [onConfirm], replacing
+  /// [notificationMessage] until a card is selected or the notification is
+  /// dismissed.
   DeviceModal.selectDevice({
     Key? key,
     required List<DeviceModalDevice> devices,
@@ -267,6 +281,7 @@ class DeviceModal extends StatefulWidget {
     String title = 'Select device',
     String confirmLabel = 'Confirm',
     bool selectable = true,
+    String selectionRequiredMessage = _defaultSelectionRequiredMessage,
     String? notificationMessage,
     DSNotificationType notificationType = DSNotificationType.information,
     VoidCallback? onNotificationClose,
@@ -283,6 +298,7 @@ class DeviceModal extends StatefulWidget {
           onSwitchDevice: null,
           footerButtonLabel: confirmLabel,
           initiallySelectedIndex: initiallySelectedIndex,
+          selectionRequiredMessage: selectionRequiredMessage,
           notificationMessage: notificationMessage,
           notificationType: notificationType,
           onNotificationClose: onNotificationClose,
@@ -329,6 +345,8 @@ class DeviceModal extends StatefulWidget {
           onSwitchDevice: onSwitchDevice,
           footerButtonLabel: switchDeviceLabel,
           initiallySelectedIndex: null,
+          // Irrelevant here: details mode has no selection-gated Confirm.
+          selectionRequiredMessage: _defaultSelectionRequiredMessage,
           notificationMessage: notificationMessage,
           notificationType: notificationType,
           onNotificationClose: onNotificationClose,
@@ -347,6 +365,9 @@ class DeviceModal extends StatefulWidget {
 
   /// The devices rendered as [DeviceCard]s: the selectable ones in list mode,
   /// the switchable ones in details mode.
+  ///
+  /// In details mode, hidden while [progress] is non-null — see
+  /// [_DeviceModalState._buildDetailsBody].
   final List<DeviceModalDevice> devices;
 
   /// Whether the [devices] cards respond to taps and show the pending
@@ -361,15 +382,14 @@ class DeviceModal extends StatefulWidget {
   /// close button altogether.
   final VoidCallback onClose;
 
-  /// Called with the pending selection when the primary confirm button is
-  /// pressed in list mode; the button is disabled when null.
+  /// Called with a device index in list mode: either immediately when a card
+  /// is tapped and [selectable] is `false` ("one-click" list, which has no
+  /// footer button — see [DeviceModal.selectDevice]), or when the primary
+  /// confirm button is pressed with a selection made and [selectable] is
+  /// `true`. The button itself is disabled when [onConfirm] is null.
   ///
-  /// Receives `null` when no device is selected. The button is deliberately not
-  /// disabled in that case: the Figma node shows an enabled Confirm alongside a
-  /// list with no visible selection, so validating the selection here would
-  /// invent behavior the design does not specify. Callers that want a
-  /// selection-gated Confirm can seed [initiallySelectedIndex] or ignore a null
-  /// argument.
+  /// When [selectable] is `true` and no device is selected, pressing Confirm
+  /// does *not* call this — it shows [selectionRequiredMessage] instead.
   final ValueChanged<int?>? onConfirm;
 
   /// Called with the index into [devices] when one of the details-mode
@@ -394,8 +414,20 @@ class DeviceModal extends StatefulWidget {
   /// is owned by this widget from that point on.
   final int? initiallySelectedIndex;
 
+  /// The selection-validation notification shown when [selectable] is `true`
+  /// and Confirm is pressed with no device selected.
+  ///
+  /// Exposed the same way [footerButtonLabel] is, so the host application can
+  /// supply its own localization; the default is the English copy the
+  /// behavior was specified with. Irrelevant in details mode.
+  final String selectionRequiredMessage;
+
   /// The message of the inline notification banner. The banner is hidden when
   /// null.
+  ///
+  /// While the [selectionRequiredMessage] validation notification is showing,
+  /// it takes this banner's place; this message returns once a device is
+  /// selected or that notification is dismissed.
   final String? notificationMessage;
 
   /// The type (and therefore the color and icon) of the inline notification.
@@ -439,6 +471,13 @@ class _DeviceModalState extends State<DeviceModal> {
   /// [DeviceModal.devices], or null for "nothing selected".
   int? _selectedIndex;
 
+  /// Whether Confirm was pressed in selectable list mode with no selection.
+  ///
+  /// While true, [_buildNotification] shows [DeviceModal.selectionRequiredMessage]
+  /// in place of [DeviceModal.notificationMessage]. Cleared by selecting a
+  /// device or dismissing that notification.
+  bool _selectionRequired = false;
+
   @override
   void initState() {
     super.initState();
@@ -475,14 +514,22 @@ class _DeviceModalState extends State<DeviceModal> {
           ? _buildSelectBody(theme)
           : _buildDetailsBody(theme, details),
       buttons: [
-        if (details == null)
+        // "One-click" list mode (selectable false) has no footer button:
+        // tapping a card already acts, via onConfirm — see _buildSelectBody.
+        if (details == null && widget.selectable)
           DSButton.primary(
             buttonText: widget.footerButtonLabel,
             onPressed: widget.onConfirm == null
                 ? null
-                : () => widget.onConfirm!(_selectedIndex),
+                : () {
+                    if (_selectedIndex == null) {
+                      setState(() => _selectionRequired = true);
+                    } else {
+                      widget.onConfirm!(_selectedIndex);
+                    }
+                  },
           )
-        else
+        else if (details != null)
           DSButton.secondary(
             buttonText: widget.footerButtonLabel,
             onPressed: widget.onSwitchDevice,
@@ -492,19 +539,29 @@ class _DeviceModalState extends State<DeviceModal> {
   }
 
   /// The `details=false` body: the optional notification followed by one
-  /// [DeviceCard] per device, selectable when [DeviceModal.selectable] is
-  /// `true`.
+  /// [DeviceCard] per device.
+  ///
+  /// When [DeviceModal.selectable] is `true`, tapping a card only moves the
+  /// pending highlight. When it is `false` ("one-click" list), tapping a card
+  /// calls [DeviceModal.onConfirm] immediately with its index instead.
   Widget _buildSelectBody(DeviceModalThemeData theme) => _Stack(
-        spacing: theme.blockSpacing,
+        defaultSpacing: theme.blockSpacing,
         children: [
-          _buildNotification(),
+          _Block.orNull(_buildNotification()),
           for (var i = 0; i < widget.devices.length; i++)
-            _buildDeviceCard(
-              widget.devices[i],
-              selected: widget.selectable && i == _selectedIndex,
-              onTap: widget.selectable
-                  ? () => setState(() => _selectedIndex = i)
-                  : null,
+            _Block.orNull(
+              _buildDeviceCard(
+                widget.devices[i],
+                selected: widget.selectable && i == _selectedIndex,
+                onTap: widget.selectable
+                    ? () => setState(() {
+                          _selectedIndex = i;
+                          _selectionRequired = false;
+                        })
+                    : widget.onConfirm == null
+                        ? null
+                        : () => widget.onConfirm!(i),
+              ),
             ),
         ],
       );
@@ -513,46 +570,69 @@ class _DeviceModalState extends State<DeviceModal> {
   /// optional segmented control, notification, progress card and switchable
   /// device list.
   ///
-  /// Every block is separated by the same `spacing/component/xs` (8) gap. The
-  /// Figma node states that gap explicitly between the notification, the
-  /// progress card and the toolbar, and merely says "a gap" around the image;
-  /// using the one stated value throughout keeps the rhythm uniform.
+  /// [progress] and the switchable [widget.devices] list are alternate states
+  /// of the same area — loading versus loaded — not simultaneous blocks: when
+  /// [progress] is shown, the device list is suppressed regardless of what
+  /// [widget.devices] holds, so a caller driving both from the same "is
+  /// loading" flag never has to remember to also clear the list itself.
+  ///
+  /// Most gaps are the default `spacing/component/xs` (8), but four are
+  /// widened to `spacing/component/m` (16), per direct confirmation against
+  /// the Figma node: between the info row and the image, below the image,
+  /// and below the notification and segmented control whenever they're
+  /// shown — regardless of which block follows.
   Widget _buildDetailsBody(
     DeviceModalThemeData theme,
     DeviceModalDeviceDetails details,
   ) =>
       _Stack(
-        spacing: theme.blockSpacing,
+        defaultSpacing: theme.blockSpacing,
         children: [
-          if (details._hasInfo) _DetailsInfoRow(details: details, theme: theme),
-          _DetailsImage(image: details.image, theme: theme),
+          if (details._hasInfo)
+            _Block(
+              _DetailsInfoRow(details: details, theme: theme),
+              spacingAfter: theme.wideBlockSpacing,
+            ),
+          _Block(
+            _DetailsImage(image: details.image, theme: theme),
+            spacingAfter: theme.wideBlockSpacing,
+          ),
           if (widget.segments.isNotEmpty)
-            DSSegmentedControl.withTexts(
-              // Full width, per the Figma node.
-              stretch: true,
-              selectedValue: widget.selectedSegment,
-              onChanged: widget.onSegmentChanged,
-              items: [
-                for (final segment in widget.segments)
-                  DSSegmentedControlItemWithText(
-                    value: segment,
-                    text: segment,
-                    // A segmented control with no handler would silently
-                    // swallow taps; disabling the segments says so.
-                    enabled: widget.onSegmentChanged != null,
-                  ),
-              ],
+            _Block(
+              DSSegmentedControl.withTexts(
+                // Full width, per the Figma node.
+                stretch: true,
+                selectedValue: widget.selectedSegment,
+                onChanged: widget.onSegmentChanged,
+                items: [
+                  for (final segment in widget.segments)
+                    DSSegmentedControlItemWithText(
+                      value: segment,
+                      text: segment,
+                      // A segmented control with no handler would silently
+                      // swallow taps; disabling the segments says so.
+                      enabled: widget.onSegmentChanged != null,
+                    ),
+                ],
+              ),
+              spacingAfter: theme.wideBlockSpacing,
             ),
-          _buildNotification(),
-          _buildProgressCard(theme),
-          for (var i = 0; i < widget.devices.length; i++)
-            _buildDeviceCard(
-              widget.devices[i],
-              selected: false,
-              onTap: widget.onOtherDeviceSelected == null
-                  ? null
-                  : () => widget.onOtherDeviceSelected!(i),
-            ),
+          _Block.orNull(
+            _buildNotification(),
+            spacingAfter: theme.wideBlockSpacing,
+          ),
+          _Block.orNull(_buildProgressCard(theme)),
+          if (widget.progress == null)
+            for (var i = 0; i < widget.devices.length; i++)
+              _Block.orNull(
+                _buildDeviceCard(
+                  widget.devices[i],
+                  selected: false,
+                  onTap: widget.onOtherDeviceSelected == null
+                      ? null
+                      : () => widget.onOtherDeviceSelected!(i),
+                ),
+              ),
         ],
       );
 
@@ -561,7 +641,22 @@ class _DeviceModalState extends State<DeviceModal> {
   /// This is the real DS component: the info-subdued background, the
   /// info-colored leading border and the Info-Circle icon of the Figma node all
   /// come from [DSInlineNotification] itself.
+  ///
+  /// While [_selectionRequired] is set, this shows
+  /// [DeviceModal.selectionRequiredMessage] as an informational notice, with
+  /// its own close handler, in place of [DeviceModal.notificationMessage].
+  ///
+  /// Deliberately [DSNotificationType.information] rather than `.warning`:
+  /// missing a selection is not a problem with existing state, just a
+  /// pending step, so the less alarming type reads better here.
   Widget? _buildNotification() {
+    if (_selectionRequired) {
+      return DSInlineNotification(
+        message: widget.selectionRequiredMessage,
+        notificationType: DSNotificationType.information,
+        onClose: () => setState(() => _selectionRequired = false),
+      );
+    }
     final message = widget.notificationMessage;
     return message == null
         ? null
@@ -631,9 +726,9 @@ class DeviceModalThemeData {
           bottom: d.spacing.component.xxs,
         ),
         toolbarSpacing = d.spacing.component.xs,
-        selectBodyTopGap = d.spacing.component.xs,
+        selectBodyTopGap = d.spacing.component.m,
         detailsBodyTopGap = 0,
-        bodyBottomGap = d.spacing.component.xs,
+        bodyBottomGap = d.spacing.component.m,
         smallVariantWidth = DSResponsiveProperty.resolveTo(
           s: d.modal.width.responsiveLayoutS.small,
           m: d.modal.width.responsiveLayoutM.small,
@@ -653,12 +748,13 @@ class DeviceModalThemeData {
           xl: d.modal.width.responsiveLayoutXl.large,
         ),
         blockSpacing = d.spacing.component.xs,
+        wideBlockSpacing = d.spacing.component.m,
         dividerWidth = d.spacing.component.m,
         infoTextStyle = d.text.textBase.copyWith(color: d.text.standard),
         imageSize = _detailsImageSize,
         imageBorderRadius = BorderRadius.circular(d.border.radius.small),
         imagePlaceholderColor = d.surface.subdued,
-        progressCardPadding = EdgeInsets.all(d.spacing.component.m),
+        progressCardPadding = EdgeInsets.all(d.spacing.component.l),
         progressCardBorderRadius =
             BorderRadius.circular(d.border.radius.standard),
         progressCardBorder = Border.all(
@@ -666,8 +762,9 @@ class DeviceModalThemeData {
           width: d.border.width.standard,
         ),
         progressCardBackground = d.surface.standard,
-        progressCardSpacing = d.spacing.component.xs,
-        progressLabelTextStyle = d.text.textBase.copyWith(color: d.text.standard);
+        progressCardSpacing = d.spacing.component.s,
+        progressLabelTextStyle =
+            d.text.textSmStrong.copyWith(color: d.text.standard);
 
   /// Fill of the modal surface.
   final Color surfaceBackground;
@@ -698,10 +795,10 @@ class DeviceModalThemeData {
   /// Gap between the footer toolbar's buttons.
   final double toolbarSpacing;
 
-  /// Gap between the header and the body in list mode.
-  ///
-  /// The Figma node places an explicit 8px `LayoutSpacing.S` between the header
-  /// and the scroll view of the `details=false` variant.
+  /// Gap between the header and the body in list mode:
+  /// `spacing/component/m` (16), per direct confirmation against the Figma
+  /// node's `details=false` variant. Deliberately not applied in details
+  /// mode; see [detailsBodyTopGap].
   final double selectBodyTopGap;
 
   /// Gap between the header and the body in details mode.
@@ -712,9 +809,14 @@ class DeviceModalThemeData {
   /// spacing token to reference.
   final double detailsBodyTopGap;
 
-  /// Gap between the body and the footer toolbar, in both modes.
+  /// Gap between the body and the footer toolbar, in both modes:
+  /// `spacing/component/m` (16), per direct confirmation against the Figma
+  /// node.
   ///
-  /// The Figma node places an explicit 8px `LayoutSpacing.S` there.
+  /// Applied only when a footer button is actually present — the "one-click"
+  /// list mode has none (see [DeviceModal.selectDevice]), and then the
+  /// surface's own [surfaceVerticalPadding] is the only space left below the
+  /// body; see [_DeviceModalSurface].
   final double bodyBottomGap;
 
   /// Width of the surface for [DSModalDialogVariant.small], per form factor.
@@ -734,11 +836,15 @@ class DeviceModalThemeData {
         DSModalDialogVariant.large => largeVariantWidth,
       };
 
-  /// The gap between two stacked content blocks, and between two device cards.
-  ///
-  /// The Figma node states 8 for every gap it names, which is
-  /// `spacing/component/xs`.
+  /// The default gap between two stacked content blocks, and between two
+  /// device cards: `spacing/component/xs` (8).
   final double blockSpacing;
+
+  /// The wider gap used after specific details-mode blocks, per direct
+  /// confirmation against the Figma node: between the info row and the
+  /// image, below the image itself, and below the notification and
+  /// segmented control when they are shown. `spacing/component/m` (16).
+  final double wideBlockSpacing;
 
   /// Total width of the "·" divider box in the details info row. The glyph is
   /// centered inside it.
@@ -768,7 +874,8 @@ class DeviceModalThemeData {
   /// the same in the list and in the details view.
   final Color imagePlaceholderColor;
 
-  /// Inner padding of the progress card.
+  /// Inner padding of the progress card: `spacing/component/l` (24), per the
+  /// Figma node.
   final EdgeInsets progressCardPadding;
 
   /// Corner radius of the progress card.
@@ -783,10 +890,12 @@ class DeviceModalThemeData {
   /// Fill of the progress card.
   final Color progressCardBackground;
 
-  /// Gap between the progress bar and its label.
+  /// Gap between the progress bar and its label: `spacing/component/s` (12),
+  /// per the Figma node.
   final double progressCardSpacing;
 
-  /// Text style, including color, of the progress card label.
+  /// Text style, including color, of the progress card label:
+  /// `text/sm/strong` (14/20), per the Figma node.
   final TextStyle progressLabelTextStyle;
 }
 
@@ -809,8 +918,8 @@ class DeviceModalThemeData {
 /// - details mode: the "Scrollview" follows the "Headline" with no
 ///   `LayoutSpacing` component at all, i.e. 24 (surface) + 40 (header) + 0 = 64
 ///   from the surface top to the first content pixel;
-/// - list mode: an explicit 8px `LayoutSpacing.S` sits between them, i.e.
-///   24 + 40 + 8 = 72.
+/// - list mode: an explicit 16px `spacing/component/m` sits between them,
+///   i.e. 24 + 40 + 16 = 80.
 ///
 /// Both render at 88 under [DSModalDialog]. A visual compensation inside the
 /// body (negative offset, `Transform`, an over-tall `OverflowBox`) was rejected:
@@ -948,7 +1057,11 @@ class _DeviceModalSurface extends StatelessWidget {
                     // gutter rather than over the content.
                     padding: theme.surfaceHorizontalPadding.copyWith(
                       top: bodyTopGap,
-                      bottom: theme.bodyBottomGap,
+                      // No footer toolbar to gap away from ("one-click" list
+                      // mode has none — see DeviceModal.selectDevice): the
+                      // surface's own 24px vertical padding is then the only
+                      // space below the body.
+                      bottom: buttons.isEmpty ? 0 : theme.bodyBottomGap,
                     ),
                     slivers: [SliverToBoxAdapter(child: body)],
                   ),
@@ -974,36 +1087,65 @@ class _DeviceModalSurface extends StatelessWidget {
   }
 }
 
-/// A [Column] of the non-null [children], separated by [spacing].
+/// A [Column] of the non-null [children], each followed by a gap: its own
+/// [_Block.spacingAfter] override, or [defaultSpacing] when absent.
 ///
 /// Every optional block of a [DeviceModal] body is passed in as a nullable
-/// child, so that omitting one leaves no stray gap behind.
+/// [_Block] (see [_Block.orNull]), so that omitting one leaves no stray gap
+/// behind.
 class _Stack extends StatelessWidget {
-  const _Stack({required this.spacing, required this.children});
+  const _Stack({required this.defaultSpacing, required this.children});
 
-  final double spacing;
-  final List<Widget?> children;
+  final double defaultSpacing;
+  final List<_Block?> children;
 
   @override
-  Widget build(BuildContext context) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        spacing: spacing,
-        children: children.nonNulls.toList(),
-      );
+  Widget build(BuildContext context) {
+    final blocks = children.nonNulls.toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < blocks.length; i++) ...[
+          if (i > 0)
+            SizedBox(height: blocks[i - 1].spacingAfter ?? defaultSpacing),
+          blocks[i].child,
+        ],
+      ],
+    );
+  }
 }
 
-/// The details-mode metadata row: the sublines and battery indicator on the
-/// left, the status tag pinned to the right.
+/// One [_Stack] child, with an optional override for the gap that follows it.
+class _Block {
+  const _Block(this.child, {this.spacingAfter});
+
+  /// Returns `null` (dropping the block, and any spacing around it) when
+  /// [child] is null, for call sites building a block from an optional
+  /// widget (e.g. [DeviceModal._buildNotification]).
+  static _Block? orNull(Widget? child, {double? spacingAfter}) =>
+      child == null ? null : _Block(child, spacingAfter: spacingAfter);
+
+  final Widget child;
+
+  /// Overrides [_Stack.defaultSpacing] for the gap following this block.
+  final double? spacingAfter;
+}
+
+/// The details-mode metadata row: sublines, battery indicator and status tag,
+/// each separated by a "·" divider, in one left-flowing group.
 ///
-/// The Figma node renders a "·" divider after *every* metadata slot, including
-/// a trailing one between the battery and the flex spacer. That trailing
-/// divider is treated as an artifact of the mock's fixed three-slot frame: here
-/// dividers only ever appear *between* two items that are actually present,
-/// which is also how [DeviceCard] uses the same glyph.
+/// Verified against the Figma node directly (file "Equipment-Components",
+/// node 5098:5220): the status tag is *not* pinned to the row's trailing
+/// edge. It sits in the same flex flow as the other items, right after a "·"
+/// divider from whichever item precedes it — the row's remaining width simply
+/// trails empty after it, since nothing else follows. A dedicated
+/// right-aligned slot (this widget's previous approach) reproduced the wrong
+/// static frame: the trailing divider before the status tag is real (present
+/// whenever an item precedes it), not the mock artifact it was assumed to be.
 ///
-/// The left group is a [Wrap] rather than a [Row] so that long sublines move
-/// onto a second line instead of overflowing the modal.
+/// The group is a [Wrap] rather than a [Row] so that long sublines move onto
+/// a second line instead of overflowing the modal.
 class _DetailsInfoRow extends StatelessWidget {
   const _DetailsInfoRow({required this.details, required this.theme});
 
@@ -1025,25 +1167,16 @@ class _DetailsInfoRow extends StatelessWidget {
           batteryLevel: batteryPercent,
           lowLevelThreshold: details.lowBatteryThreshold,
         ),
+      if (status != null)
+        DSTag.status(text: status.label, statusType: status.tagType),
     ];
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        Expanded(
-          child: Wrap(
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              for (var i = 0; i < items.length; i++) ...[
-                if (i > 0) _InfoDivider(theme: theme),
-                items[i],
-              ],
-            ],
-          ),
-        ),
-        if (status != null) ...[
-          SizedBox(width: theme.blockSpacing),
-          DSTag.status(text: status.label, statusType: status.tagType),
+        for (var i = 0; i < items.length; i++) ...[
+          if (i > 0) _InfoDivider(theme: theme),
+          items[i],
         ],
       ],
     );
@@ -1069,6 +1202,13 @@ class _InfoDivider extends StatelessWidget {
 }
 
 /// The square image slot of the details mode.
+///
+/// Horizontally centered, unlike the rest of the [_Stack] body (which is
+/// left-aligned): the Figma node's "Device information" group wraps the info
+/// row and the image in a flex column with `items-center`, so the fixed
+/// 240x240 image centers within the full content width while the full-width
+/// info row above it is unaffected. Confirmed directly against the Figma node
+/// (file "Equipment-Components", node 5098:5220).
 class _DetailsImage extends StatelessWidget {
   const _DetailsImage({required this.image, required this.theme});
 
@@ -1076,16 +1216,19 @@ class _DetailsImage extends StatelessWidget {
   final DeviceModalThemeData theme;
 
   @override
-  Widget build(BuildContext context) => SizedBox.square(
-        dimension: theme.imageSize,
-        // Decorative: the image conveys nothing the modal title and info row
-        // do not already state, so it is kept out of the semantics tree rather
-        // than announced as an unlabeled image. Same call [DeviceCard] makes
-        // for its thumbnail.
-        child: ExcludeSemantics(
-          child: ClipRRect(
-            borderRadius: theme.imageBorderRadius,
-            child: image ?? ColoredBox(color: theme.imagePlaceholderColor),
+  Widget build(BuildContext context) => Align(
+        alignment: Alignment.topCenter,
+        child: SizedBox.square(
+          dimension: theme.imageSize,
+          // Decorative: the image conveys nothing the modal title and info
+          // row do not already state, so it is kept out of the semantics tree
+          // rather than announced as an unlabeled image. Same call
+          // [DeviceCard] makes for its thumbnail.
+          child: ExcludeSemantics(
+            child: ClipRRect(
+              borderRadius: theme.imageBorderRadius,
+              child: image ?? ColoredBox(color: theme.imagePlaceholderColor),
+            ),
           ),
         ),
       );

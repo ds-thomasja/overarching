@@ -1,0 +1,240 @@
+h2. User Story
+
+As a clinician working in an environment with multiple connected devices, I want to select a specific device from a list quickly and with minimal interaction, so that I can proceed with my clinical task without workflow interruption.
+
+----
+
+h2. Design Definition & Assets
+
+* *Figma Link:* [DeviceModal|https://www.figma.com/design/oY2AELOxR8s6HKYkCTAOQs/Equipment-Components?node-id=5098-5219]
+* *Flutter Component:* TBD — not yet pushed to origin. {{device_modal.dart}} exists locally at {{overarching/lib/components/device_modal/device_modal.dart}}, but the most recent commit touching it ({{2b06353}}) is not present on {{origin/main}}, and the working tree has further uncommitted changes on top of that commit.
+* *Interaction Model:* {{DeviceModal}} exposes two named constructors that produce structurally different content, chosen by which one the caller invokes rather than by a boolean flag. {{DeviceModal.selectDevice}} renders one {{DeviceCard}} per {{devices}} entry plus a primary footer button (default label "Confirm"). When {{selectable}} is {{true}} (the default), tapping a card only moves a pending selection highlight that the widget owns internally; only pressing the primary button — via {{onConfirm}} — commits that selection, passing its index. Pressing it with nothing selected shows {{selectionRequiredMessage}} as an informational notification in place of {{notificationMessage}} until a card is picked or that notification is dismissed. When {{selectable}} is {{false}} ("one-click" list), there is no footer button at all — tapping any card calls {{onConfirm}} immediately with its index, and {{confirmLabel}}/{{selectionRequiredMessage}} are unused. {{DeviceModal.deviceDetails}} instead renders one focused {{DeviceModalDeviceDetails}} (its {{name}} doubling as the modal title), an info row of sublines/battery/status, a fixed 240×240 image slot, an optional segmented control ({{segments}}), an optional inline notification, and then either an optional progress card ({{progress}}, an indeterminate or determinate {{DSProgressBar}} plus a label) or a switchable list of {{otherDevices}} rendered as {{DeviceCard}}s — {{progress}} and that list are alternate states of the same area, not simultaneous: whenever {{progress}} is set the list is suppressed regardless of what {{otherDevices}} contains. Tapping a switchable device card calls {{onOtherDeviceSelected}} with its index (those cards never show a selection highlight); a secondary footer button (default label "Switch device") calls {{onSwitchDevice}}. In both modes, pressing the header close icon-button calls {{onClose}} — the caller is responsible for actually dismissing the modal (typically the {{pop}} callback from {{showDSModalDialog}}); passing the DS {{hideDialogCloseButton}} sentinel as {{onClose}} removes the close button entirely. {{DeviceModal}} is not itself a route: it must be shown via {{showDSModalDialog}}, which supplies the dimmed barrier, centered alignment, route and inherited themes.
+
+----
+
+h2. Component Props
+
+{{DeviceModal}} has no single flat prop list — its two named constructors take different prop sets for their structurally different content (see Interaction Model above). Three supporting data classes carry the per-device and per-progress information: {{DeviceModalDevice}} (one row in either device list), {{DeviceModalDeviceDetails}} (the single focused device in details mode) and {{DeviceModalProgress}} (the details-mode progress card).
+
+h3. DeviceModal.selectDevice
+
+|| Prop || Type || Default || Description ||
+| {{devices}} | List<DeviceModalDevice> | required, no default | The selectable devices, one {{DeviceCard}} each |
+| {{onClose}} | VoidCallback | required, no default | Called when the header close icon-button is pressed |
+| {{onConfirm}} | ValueChanged<int?>? | null | Called with the selected/tapped index; null disables the primary button |
+| {{initiallySelectedIndex}} | int? | null | Seeds the pending selection once, on first build only |
+| {{title}} | String | 'Select device' | Modal title |
+| {{confirmLabel}} | String | 'Confirm' | Primary footer button label |
+| {{selectable}} | bool | true | true = tap moves a pending highlight, gated Confirm; false = tap calls {{onConfirm}} immediately, no footer button |
+| {{selectionRequiredMessage}} | String | 'Please select a device before continue' | Validation notification shown when Confirm is pressed with no selection |
+| {{notificationMessage}} | String? | null | Inline notification message; hidden when null |
+| {{notificationType}} | DSNotificationType | DSNotificationType.information | Type/color/icon of the inline notification |
+| {{onNotificationClose}} | VoidCallback? | null | Called when the notification's own close control is pressed |
+| {{variant}} | DSModalDialogVariant | DSModalDialogVariant.small | DS modal size variant |
+
+h3. DeviceModal.deviceDetails
+
+|| Prop || Type || Default || Description ||
+| {{device}} | DeviceModalDeviceDetails | required, no default | The focused device; its {{name}} doubles as the modal title |
+| {{onClose}} | VoidCallback | required, no default | Called when the header close icon-button is pressed |
+| {{otherDevices}} | List<DeviceModalDevice> | const [] | Switchable devices, rendered as {{DeviceCard}}s below the rest of the content |
+| {{onOtherDeviceSelected}} | ValueChanged<int>? | null | Called with the index of a tapped switchable device card; cards are non-interactive when null |
+| {{onSwitchDevice}} | VoidCallback? | null | Called when the secondary footer button is pressed; the button is disabled when null |
+| {{switchDeviceLabel}} | String | 'Switch device' | Secondary footer button label |
+| {{segments}} | List<String> | const [] | Labels of the segmented control; empty hides it. Each label doubles as its value and must be unique (asserted) |
+| {{selectedSegment}} | String? | null | Currently selected segment label |
+| {{onSegmentChanged}} | ValueChanged<String?>? | null | Called with the newly selected segment, or null on DS deselection; segments render disabled when null |
+| {{progress}} | DeviceModalProgress? | null | Progress card; hidden when null. Suppresses {{otherDevices}} while shown |
+| {{notificationMessage}} | String? | null | Inline notification message; hidden when null |
+| {{notificationType}} | DSNotificationType | DSNotificationType.information | Type/color/icon of the inline notification |
+| {{onNotificationClose}} | VoidCallback? | null | Called when the notification's own close control is pressed |
+| {{variant}} | DSModalDialogVariant | DSModalDialogVariant.small | DS modal size variant |
+
+h3. DeviceModalDevice
+
+|| Prop || Type || Default || Description ||
+| {{name}} | String | required, no default | Forwarded to {{DeviceCard.name}} |
+| {{subline}} | String? | null | Forwarded to {{DeviceCard.subline}} |
+| {{thumbnail}} | Widget? | null | Forwarded to {{DeviceCard.thumbnail}} |
+| {{batteryPercent}} | int? | null | Forwarded to {{DeviceCard.batteryPercent}}; hidden when null |
+| {{lowBatteryThreshold}} | int | 30 | Forwarded to {{DeviceCard.lowBatteryThreshold}} |
+| {{status}} | DeviceCardStatus? | null | Forwarded to {{DeviceCard.status}}; hidden when null (deliberately defaults to null, not {{DeviceCard}}'s own {{online}} default — see Content Logic & Edge Cases) |
+| {{enabled}} | bool | true | Forwarded to {{DeviceCard.enabled}} |
+
+h3. DeviceModalDeviceDetails
+
+|| Prop || Type || Default || Description ||
+| {{name}} | String | required, no default | Device name; doubles as the modal title in details mode |
+| {{subline1}} | String? | null | First info-row metadata item; hidden when null |
+| {{subline2}} | String? | null | Second info-row metadata item; hidden when null |
+| {{batteryPercent}} | int? | null | Battery level 0–100 rendered by {{DSBatteryIndicator}}; hidden when null |
+| {{lowBatteryThreshold}} | int | 30 | Forwarded to {{DSBatteryIndicator.lowLevelThreshold}} |
+| {{status}} | DeviceCardStatus? | null | Connectivity status tag, right-most in the info row; hidden when null |
+| {{image}} | Widget? | null | Fills the 240×240 image slot; falls back to a plain placeholder box when omitted |
+
+h3. DeviceModalProgress
+
+|| Prop || Type || Default || Description ||
+| {{label}} | String | required, no default | Text rendered below the progress bar, e.g. "Loading description..." |
+| {{value}} | double? | null | 0.0–1.0 for a determinate bar; null for an indeterminate (animated) bar |
+
+{{DeviceCardStatus}} enum values: see [DeviceCard|../device_card/device_card.txt] Component Props section (shared type — {{online}}/{{offline}}).
+
+----
+
+h2. Component Anatomy & Flutter Mapping
+
+|| Element || Flutter Widget || Documentation ||
+| Modal barrier, centering, route | {{showDSModalDialog}} — not part of this widget; caller-supplied | [STORYBOOK LINK NEEDED — Modal dialog] |
+| Modal surface (chrome) | {{_DeviceModalSurface}} — hand-composed, token-for-token rebuild of {{DSModalDialog}}'s chrome, with a configurable header-to-body gap (see Content Logic & Edge Cases for why) | n/a — bespoke |
+| Header row | {{Row}} (title + close button) inside {{Padding}} ({{surfaceHorizontalPadding}} + {{titlePadding}}) | n/a |
+| Title | Plain {{Text}} ({{titleTextStyle}} = heading2xl), 1 line, ellipsis overflow | n/a — deliberately not {{DSText}}, see Content Logic & Edge Cases |
+| Close icon-button | {{DSButton.tertiary}} (icon: {{DSIcons.close}}, onPressed: onClose) | [Button|https://zeroheight.com/0b922d40b/v/0/p/156acf-button] |
+| Scrollable body | {{DSCustomScrollView}} (shrinkWrap: true, padding varies by mode) | [STORYBOOK LINK NEEDED — Custom scroll view] |
+| Body content stack | {{_Stack}} — custom {{Column}} inserting a gap after each non-null {{_Block}} child | n/a — bespoke layout helper |
+| Inline notification (both modes) | {{DSInlineNotification}} (message, notificationType, onClose) | [Inline notification|https://zeroheight.com/0b922d40b/v/0/p/5697b4-inline-notification] |
+| Device row (both modes' lists) | {{DeviceCard}} (width: double.infinity, name, subline, thumbnail, batteryPercent, lowBatteryThreshold, status, enabled, selected, onTap) | [DeviceCard|../device_card/device_card.txt] |
+| Footer toolbar | {{Wrap}} (alignment: end, spacing: toolbarSpacing) inside {{Padding}} | n/a |
+| Confirm button (select mode) | {{DSButton.primary}} (buttonText: footerButtonLabel, onPressed gated on a selection existing) | [Button|https://zeroheight.com/0b922d40b/v/0/p/156acf-button] |
+| Switch device button (details mode) | {{DSButton.secondary}} (buttonText: footerButtonLabel, onPressed: onSwitchDevice) | [Button|https://zeroheight.com/0b922d40b/v/0/p/156acf-button] |
+| Details info row | {{_DetailsInfoRow}} — custom {{Wrap}} of sublines, {{DSBatteryIndicator}} and {{DSTag.status}}, each preceded by a "·" divider except the first item | n/a — bespoke |
+| "·" divider (info row) | {{_InfoDivider}} — {{DSText}} inside {{ExcludeSemantics}} + fixed-width {{SizedBox}} | n/a — decorative |
+| Battery indicator (info row) | {{DSBatteryIndicator}} (batteryLevel, lowLevelThreshold) | [STORYBOOK LINK NEEDED — Battery indicator] |
+| Status tag (info row) | {{DSTag.status}} (text: status.label, statusType: status.tagType) | [Tag|https://zeroheight.com/0b922d40b/v/0/p/40b4d0-tag] |
+| Details image slot | {{_DetailsImage}} — {{ClipRRect}} around the {{image}} widget or a {{ColoredBox}} fallback, wrapped in {{ExcludeSemantics}}, top-centered | n/a — bespoke, fixed 240×240 (see Content Logic & Edge Cases) |
+| Segmented control | {{DSSegmentedControl.withTexts}} (stretch: true, selectedValue, onChanged, items: DSSegmentedControlItemWithText, each with {{enabled}} tied to onSegmentChanged) | [Segmented control|https://zeroheight.com/0b922d40b/v/0/p/53abd9-segmented-control] |
+| Progress card | {{_ProgressCard}} — hand-built bordered {{DecoratedBox}} (see Content Logic & Edge Cases for why) wrapping a {{DSProgressBar}} and a {{DSText}} label | n/a — bespoke chrome, real DS bar inside |
+| Progress bar | {{DSProgressBar}} (value: null for indeterminate, else 0.0–1.0) | [STORYBOOK LINK NEEDED — Progress bar] |
+| Selectable device list (select mode) | {{for}} loop of {{DeviceCard}} rows; {{selected}} reflects the pending highlight index, {{onTap}} either moves the highlight or calls {{onConfirm}} directly (per {{selectable}}) | n/a |
+| Dimmer | Painted by {{showDSModalDialog}}'s barrier, not by this widget | n/a |
+
+----
+
+h2. Acceptance Criteria
+
+ - *Functional:*
+ -- {{DeviceModal.selectDevice}} and {{DeviceModal.deviceDetails}} are the only two entry points — there is no runtime flag that toggles between their content shapes
+ -- In select mode, when {{selectable}} is {{true}} (default), tapping a card only moves the pending selection highlight; {{onConfirm}} fires only when the primary button is pressed, with the selected index
+ -- In select mode, when {{selectable}} is {{false}}, tapping a card calls {{onConfirm}} immediately with that card's index; no footer button renders, and {{confirmLabel}}/{{selectionRequiredMessage}} are unused
+ -- Pressing the primary button with no card selected shows {{selectionRequiredMessage}} (default "Please select a device before continue") as an informational notification in place of {{notificationMessage}}, and does not call {{onConfirm}}; selecting a card or dismissing that notification restores {{notificationMessage}}
+ -- {{initiallySelectedIndex}} seeds the pending selection once, on first build, in select mode; later prop changes are ignored once the widget owns the selection
+ -- If {{devices}} shrinks below the currently selected index, the selection is cleared rather than pointing at a stale/out-of-range index
+ -- In details mode, tapping an {{otherDevices}} card calls {{onOtherDeviceSelected}} with its index when non-null; those cards never show a selection highlight themselves
+ -- In details mode, the secondary button calls {{onSwitchDevice}} and is disabled when it is null
+ -- The details-mode info row renders only when at least one of {{subline1}}, {{subline2}}, {{batteryPercent}}, {{status}} is non-null; present items are separated by a "·" divider, in that fixed order
+ -- The details-mode image renders {{image}} when supplied, else a plain placeholder box, at a fixed 240×240 square, centered
+ -- The details-mode segmented control renders only when {{segments}} is non-empty; each label doubles as its own value (must be unique, enforced by an assertion), and every segment renders fully disabled — not merely inert — when {{onSegmentChanged}} is null
+ -- The details-mode progress card renders only when {{progress}} is non-null; a null {{DeviceModalProgress.value}} yields an indeterminate bar, otherwise the bar shows {{value}} (0.0–1.0)
+ -- Whenever {{progress}} is non-null, the details-mode switchable device list is suppressed entirely, regardless of what {{otherDevices}} contains
+ -- The inline notification (both modes) shows {{notificationMessage}} with {{notificationType}} styling and calls {{onNotificationClose}} on its own close control; it is hidden entirely when {{notificationMessage}} is null
+ -- The modal title truncates to 1 line with an ellipsis in both modes; in details mode it always equals the focused device's {{name}}
+ -- Pressing the header close icon-button always calls {{onClose}}; passing the DS {{hideDialogCloseButton}} sentinel as {{onClose}} removes the close button entirely
+
+ - *States:*
+ -- Device rows inherit {{DeviceCard}}'s complete state set (default/hover/pressed/focus/selected/disabled) unchanged — see [DeviceCard|../device_card/device_card.txt] Acceptance Criteria → States
+ -- Segmented control segments follow {{DSSegmentedControl}}'s own selected/enabled states; a segment is disabled outright, not merely non-interactive, when {{onSegmentChanged}} is null
+ -- Progress bar: indeterminate (animated) when {{DeviceModalProgress.value}} is null; determinate otherwise
+ -- Close icon-button, primary and secondary footer buttons follow {{DSButton}}'s own tertiary/primary/secondary state sets respectively
+
+ - *A11y:*
+ -- The title is a plain {{Text}}, not {{DSText}} — a truncated title has no hover tooltip (deliberate trade-off; see Content Logic & Edge Cases)
+ -- The "·" divider glyphs are excluded from the semantics tree ({{ExcludeSemantics}}), both in the details info row and (via {{DeviceCard}}) in device rows
+ -- The details-mode image is excluded from semantics, since it conveys nothing the title/info row don't already state
+ -- Close icon-button and footer buttons are standard {{DSButton}} instances, inheriting their built-in keyboard/focus/ARIA behavior
+ -- Device rows inherit {{DeviceCard}}'s own accessibility behavior (button semantics, focus, keyboard activation)
+
+ - *Visual Fidelity:*
+ -- *Modal surface:*
+ --- Sizing: width per {{DSModalDialogVariant.small}} (default) — {{var(--modal-width-responsiveLayoutXl-small, 486px)}} at the extra-large form factor, narrowing at smaller form factors per DS's own responsive width tokens (exact S/M/L pixel values not confirmed against this Figma node, which specifies only the XL/486 frame — confirm with Design if needed)
+ --- Background: {{var(--surface-standard, #ffffff)}}
+ --- Border-radius: {{var(--border-radius-large, 16px)}}
+ --- Padding: {{var(--spacing-layout-m, 24px)}} on all sides, applied separately to header/body/toolbar
+ --- Elevation: none — matches {{DSModalDialog}}, which decorates color and radius only
+ -- *Header row:*
+ --- Title: Be Vietnam Pro · 24px · 600 (SemiBold) · 32px line-height · -0.6px letter-spacing — {{heading2xl}}, color {{var(--text-standard, #242424)}}
+ --- Title padding: {{var(--spacing-component-xxs, 4px)}} top/bottom, turning the 32px line box into a 40px row matching the close button
+ -- *Body spacing:*
+ --- Header-to-body gap: 0 in details mode (no Figma {{LayoutSpacing}} between header and scrollview); {{var(--spacing-component-m, 16px)}} in select/list mode
+ --- Body-to-toolbar gap: {{var(--spacing-component-m, 16px)}} in both modes, applied only when a footer button is present
+ --- Default gap between stacked content blocks / device cards: {{var(--spacing-component-xs, 8px)}}
+ --- Wider gap after specific details-mode blocks (info row→image, image→next block, notification/segmented control→next block): {{var(--spacing-component-m, 16px)}}
+ -- *Inline notification:*
+ --- Background: {{var(--surface-information-subdued, #eaf5fa)}}; border 1px {{var(--border-information, #24759e)}}, radius {{var(--border-radius-standard, 12px)}}
+ --- Icon: Info-Circle, {{var(--icon-information, #24759e)}}
+ --- Text: Be Vietnam Pro · 16px · 400 (Regular) · 24px line-height · -0.4px letter-spacing — {{textBase}}, color {{var(--text-standard, #242424)}}
+ -- *Details info row:*
+ --- Text (sublines): Be Vietnam Pro · 14px · 400 (Regular) · 20px line-height · -0.35px letter-spacing — {{textSm}}, color {{var(--text-standard, #242424)}}
+ --- "·" divider: centered in a fixed {{var(--spacing-component-m, 16px)}} box, same style as subline text
+ --- Battery indicator: {{DSBatteryIndicator}}, 24×24px icon + percentage text Be Vietnam Pro · 14px · 600 (SemiBold) · 20px line-height · -0.35px letter-spacing — {{textSmStrong}}
+ --- Status tag ({{DSTag.status}}): Online background {{var(--surface-success, #afe4c8)}}; Offline background {{var(--surface-neutral-standard, #d7d7d7)}}; text Be Vietnam Pro · 12px · 400 · 16px line-height · -0.3px letter-spacing — {{textXs}}, pill radius {{var(--border-radius-pill, 999px)}}
+ -- *Details image:*
+ --- Sizing: fixed 240×240px — deliberately NOT a DS token; the only matching size token ({{image.size.card}}, 128/64) is meant for card thumbnails, so this is a literal constant kept next to the tokens as a single point of change
+ --- Corner radius: {{var(--border-radius-small, 4px)}}
+ --- Fallback fill: {{var(--surface-subdued, #f5f5f5)}}
+ -- *Segmented control:*
+ --- {{DSSegmentedControl.withTexts}}, {{stretch: true}} (full width, per Figma)
+ --- Track background: {{var(--surface-neutral-standard, #d7d7d7)}}; container radius {{var(--border-radius-standard, 12px)}}; padding {{var(--spacing-component-xxs, 4px)}}
+ --- Selected segment: {{var(--surface-standard, #ffffff)}}, radius {{var(--border-radius-medium, 8px)}}, {{elevation1}} shadow
+ --- Label: Be Vietnam Pro · 14px · 600 (SemiBold) · 24px line-height · -0.35px letter-spacing — {{textAction}}
+ -- *Progress card:*
+ --- Padding: {{var(--spacing-component-l, 24px)}}
+ --- Border: 1px {{var(--border-width-standard, 1px)}} [TOKEN NEEDED — confirm hex value of {{border/standard}}; not present in the Figma variable set pulled for this node's default variant]
+ --- Corner radius: {{var(--border-radius-standard, 12px)}} — not specified by the Figma node itself; the DS card radius is used
+ --- Background: {{var(--surface-standard, #ffffff)}}
+ --- Gap bar→label: {{var(--spacing-component-s, 12px)}}
+ --- Progress bar ({{DSProgressBar}}): 4px height; track {{var(--surface-neutral-standard, #d7d7d7)}}; active fill {{var(--action-primary-standard, #0f62fe)}}; pill-radius ends
+ --- Label: Be Vietnam Pro · 14px · 600 (SemiBold) · 20px line-height · -0.35px letter-spacing — {{textSmStrong}}, color {{var(--text-standard, #242424)}}
+ -- *Toolbar:*
+ --- Gap between buttons: {{var(--spacing-component-xs, 8px)}}
+ --- Confirm (primary): background {{var(--action-primary-standard, #0f62fe)}}; text color {{var(--text-on-primary, #ffffff)}}; {{elevation2}} shadow
+ --- Switch device (secondary): background {{var(--action-secondary-standard, #ffffff)}}; 1px {{var(--border-subdued, #ebebeb)}} border; {{elevation1}} shadow
+ -- *Dimmer:*
+ --- Fill: {{var(--background-modal-dimmer, rgba(0,0,0,0.32))}}
+ -- *Scrollbar:*
+ --- DS hover-visible scrollbar via {{DSCustomScrollView}}; thumb {{var(--surface-pressed, #d7d7d7)}}, pill radius, 6px wide, positioned in the right gutter
+
+----
+
+h2. Content Logic & Edge Cases
+
+* *Two named constructors, not one boolean:* the Figma node's single {{details}} boolean selects two structurally different content shapes with different data needs; the component exposes them as {{DeviceModal.selectDevice}} and {{DeviceModal.deviceDetails}} instead of a shared API with everything optional.
+* *Selection is modal-owned, not caller-owned:* unlike {{DeviceCard.selected}} (a caller-driven prop) or DS toggle widgets, the pending selection in select mode lives inside {{DeviceModal}}'s own state and is only surfaced via {{onConfirm}} on commit — hoisting a selection that gets discarded on close would buy the caller nothing.
+* *Progress vs. device list mutual exclusion:* {{progress}} and the switchable {{otherDevices}} list in details mode are alternate states of one area, not simultaneous — when {{progress}} is set, the list is hidden regardless of its contents, so a caller driving both off one "is loading" flag never has to remember to clear the list separately.
+* *Header-to-body gap breaks from {{DSModalDialog}}:* {{DSModalDialog}} hard-codes 24px above and below its body with no override; the Figma node wants 0 in details mode and 16px in list mode. Since {{spacing.layout.m}} also drives the surface's own padding (which Figma does want at 24), there is no token-only fix. The surface is therefore hand-rebuilt token-for-token as {{_DeviceModalSurface}} rather than wrapping {{DSModalDialog}} directly — the one deliberate place Figma spacing wins over DS chrome, at the cost of this surface duplicating (and being able to drift from) {{DSModalDialog}}'s own arrangement.
+* *240px image slot is not token-derived:* the Figma node specifies a fixed 240×240 slot; DS v51.0.0's only matching size token ({{image.size.card}}, 128/64) is meant for card thumbnails, so the value is kept as a literal constant to be replaced if DS ever introduces a matching token.
+* *No DS non-interactive bordered card exists:* the progress card's outline is hand-built from {{border.standard}}/{{border.width.standard}}/{{surface.standard}} tokens directly, because DS v51.0.0 has no non-interactive bordered card ({{DSContainer}} has no border; {{DSSpaciousCard}} is an interactive surface).
+* *Plain {{Text}} for the title, not {{DSText}}:* the Figma details variant ellipsis-truncates the device name, which {{DSModalDialog}}'s own unbounded {{Text}} could not do; a plain {{Text}} keeps the title's color resolving through the ambient {{DefaultTextStyle}} exactly as before, at the cost of no hover tooltip on a truncated title.
+* *Stale selection guard:* if {{devices}} shrinks (e.g. a filtered list) below the currently pending selected index, the selection is cleared on the next build rather than risking a stale index ever reaching {{onConfirm}}.
+* *"One-click" list has no footer at all:* when {{selectable}} is {{false}}, there is no footer button and therefore no {{bodyBottomGap}} below the body — only the surface's own vertical padding remains below the last card.
+* *Figma's {{scrollbar}} boolean has no equivalent:* {{DSCustomScrollView}} always scrolls the body and always shows the real DS hover-visible scrollbar, so there is nothing in this component to toggle for it.
+* *Device rows reuse the real {{DeviceCard}}, stretched:* rows render at {{width: double.infinity}} rather than {{DeviceCard}}'s own 438px default, so they keep filling the modal's content width if the DS modal narrows on a smaller form factor or the scrollbar gutter takes width away; at the Figma modal width (486 − 2×24 padding) both numbers coincide.
+* *{{status}} defaults to null, not {{DeviceCard}}'s own {{online}} default:* {{DeviceModalDevice}}/{{DeviceModalDeviceDetails}} describe data, and a device whose connectivity is not stated should not claim to be online; this also makes the name/subline-only card of the Figma details mode the zero-configuration case.
+* *Variant defaults to {{DSModalDialogVariant.small}}:* this is the DS variant whose width resolves to 486 at the extra-large form factor, matching the Figma node exactly; other {{variant}} values are accepted and use their own DS responsive widths.
+
+----
+
+h2. Responsiveness & Links
+
+* Surface width follows {{DSModalDialogVariant.small}}'s responsive token by default (486px at the XL form factor, narrowing at smaller form factors per DS's own responsive width tokens — see Visual Fidelity for the unconfirmed S/M/L values); other {{variant}} values use their own DS responsive widths.
+* The 240px details image and the device card row height are fixed regardless of form factor; only the surface width and the scrollbar gutter respond.
+* Figma: [DeviceModal|https://www.figma.com/design/oY2AELOxR8s6HKYkCTAOQs/Equipment-Components?node-id=5098-5219]
+* Related component: [DeviceCard|../device_card/device_card.txt]
+* Storybook: [Button|https://zeroheight.com/0b922d40b/v/0/p/156acf-button]
+* Storybook: [STORYBOOK LINK NEEDED — Modal dialog / DSModalDialog]
+* Storybook: [STORYBOOK LINK NEEDED — Custom scroll view / DSCustomScrollView]
+* Storybook: [STORYBOOK LINK NEEDED — Battery indicator / DSBatteryIndicator]
+* Storybook: [STORYBOOK LINK NEEDED — Progress bar / DSProgressBar]
+* Storybook: [STORYBOOK LINK NEEDED — Text / DSText]
+* ZeroHeight: [Inline notification|https://zeroheight.com/0b922d40b/v/0/p/5697b4-inline-notification]
+* ZeroHeight: [Tag|https://zeroheight.com/0b922d40b/v/0/p/40b4d0-tag]
+* ZeroHeight: [Segmented control|https://zeroheight.com/0b922d40b/v/0/p/53abd9-segmented-control]
+
+----
+
+h2. Approvals
+
+||Team involved||Responsible||Status||
+|Design|[~Thomas.Jakob@dentsplysirona.com] ||
+|Product Management|[] ||
+|Product Owner|[] ||
+| | | |
